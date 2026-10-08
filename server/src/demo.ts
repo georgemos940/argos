@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Alert } from './lapi.js';
 import { slim, summarize } from './stats.js';
+import { DEFAULT_POLICY, cleanPolicy, renderPolicy, renderRules, type IgnoreRule } from './policy.js';
 
 // DEMO=1: the whole ui on generated data, no crowdsec, no docker, read-only
 
@@ -60,6 +61,13 @@ const series = (base: number, amp: number) => Array.from({ length: 120 }, (_, i)
 const hubItem = (name: string, description: string) => ({ name, description, status: 'enabled', local_version: (rnd() * 2 + 0.1).toFixed(1) });
 const embed = { username: 'Argos', avatarUrl: '', title: '{flag} {ip} · {scenario}', description: '**{events}** events from {network}\n{decision}',
   colorBan: '#ef4444', colorAlert: '#f59e0b', fields: ['country', 'site'], footer: 'Argos', linkBase: '', timestamp: true };
+
+const demoPolicy = { ...DEFAULT_POLICY, escalate: true, captcha: true };
+const demoRules: IgnoreRule[] = [
+  { id: 'health', name: 'Uptime checks', enabled: true, conditions: [{ field: 'path', op: 'equals', value: '/healthz' }] },
+  { id: 'next', name: 'App assets', enabled: true, conditions: [{ field: 'host', op: 'equals', value: 'shop.example.com' }, { field: 'path', op: 'startsWith', value: '/_next/' }] },
+  { id: 'bots', name: 'Search engine crawlers on 404s', enabled: false, conditions: [{ field: 'user_agent', op: 'regex', value: '(?i)(googlebot|bingbot)' }, { field: 'status', op: 'equals', value: '404' }] },
+];
 
 const routes: Record<string, (c: any) => unknown> = {
   '/api/auth/me': () => ({ setup: false, user: { username: 'demo', role: 'admin', totp: true }, needsTotp: false, instance: 'demo', home: [8.68, 50.11], demo: true }),
@@ -131,6 +139,14 @@ const routes: Record<string, (c: any) => unknown> = {
   '/api/audit': () => [['demo', 'decision.add', 'Ip:203.0.113.77'], ['oncall', 'cloudflare.level', 'example.net'], ['demo', 'blocklist.update', 'firehol-level1'],
     ['demo', 'hub.upgrade', '4 items'], ['oncall', 'login', '198.51.100.12'], ['intern', 'login.failed', '198.51.100.40']]
     .map(([u, a, t], i) => ({ id: 100 - i, ts: now() - i * 2400_000, username: u, action: a, target: t, detail: null })),
+  '/api/policy': () => ({ live: renderPolicy(demoPolicy), managed: true, policy: demoPolicy, generated: renderPolicy(demoPolicy), backup: { at: now() - 6 * 86400_000 } }),
+  '/api/ignore-rules': () => ({ rules: demoRules, live: renderRules(demoRules), inSync: true, backup: null }),
+  '/api/bouncer-metrics': () => ({ bouncers: [{ name: 'firewall-bouncer', processed: { bytes: 4662246370189, packets: 1483259338 }, dropped: 9172, origins: [
+    { origin: 'crowdsec', label: 'CrowdSec detections', bytes: 229808, packets: 4048, active: 187 },
+    { origin: 'lists:firehol_greensnow', label: 'firehol_greensnow', bytes: 108212, packets: 2311, active: 3982 },
+    { origin: 'CAPI', label: 'Community blocklist', bytes: 91790, packets: 1930, active: 22719 },
+    { origin: 'cscli', label: 'Manual and Argos', bytes: 40120, packets: 883, active: 6349 },
+  ] }] }),
   '/api/allowlists': () => [
     { name: 'trusted', description: 'Office and monitoring', created_at: '', updated_at: '', items: [{ value: '198.51.100.10', comment: 'office' }, { value: '203.0.113.0/28', comment: 'uptime monitor' }] },
     { name: 'partners', description: 'Payment and API partners', created_at: '', updated_at: '', items: [{ value: '192.0.2.44', comment: 'payment gateway webhooks' }] }],
@@ -156,6 +172,7 @@ export function mountDemo(app: Hono<any>): void {
   app.get('/api/ip/:ip', (c) => c.json(ipProfile(c)));
   app.get('/api/alerts/:id', (c) => c.json(alerts.find((a) => a.id === Number(c.req.param('id'))) ?? alerts[0]));
   for (const [path, fn] of Object.entries(routes)) app.get(path, (c) => c.json(fn(c) as any));
+  app.post('/api/policy/preview', async (c) => c.json({ generated: renderPolicy(cleanPolicy(await c.req.json())) }));
   app.all('/api/*', (c) => (c.req.method === 'GET'
     ? c.json({ error: 'not available in the demo' }, 404)
     : c.json({ error: 'This is a read-only demo. Run Argos with your own CrowdSec to change things.' }, 403)));

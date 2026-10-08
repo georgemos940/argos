@@ -15,7 +15,12 @@ import {
 import { addDecision, deleteDecision, deleteDecisionsFor, getAlert, getAlerts, lapiHealth } from './lapi.js';
 import { recentAlerts, slim, summarize } from './stats.js';
 import { SAMPLE as GRAFANA_SAMPLE, checkToken, relay, relayState, setRelayWebhook } from './grafana-relay.js';
-import { cscli, explain, parsePlan, restartCrowdsec, simulationStatus } from './cscli.js';
+import { cscli, explain, parsePlan, readCrowdsecFile, simulationStatus } from './cscli.js';
+import {
+  DEFAULT_POLICY, EMPTY_RULES, POLICY_MARK, applyFile, backupOf, cleanPolicy, cleanRules, guessPolicy, renderPolicy, renderRules, restartAndWait,
+  type IgnoreRule, type Policy,
+} from './policy.js';
+import { checkContent } from './docker.js';
 import {
   PRESETS as BLOCKLIST_PRESETS, disable as disableBlocklist, listAll as listBlocklists, refresh as refreshBlocklist,
   remove as removeBlocklist, startBlocklists, upsert as upsertBlocklist,
@@ -358,16 +363,6 @@ app.get('/api/hub/plan', admin, async (c) => {
   return c.json(parsePlan(out));
 });
 
-async function restartAndWait(): Promise<{ back: boolean; seconds: number }> {
-  const t0 = Date.now();
-  await restartCrowdsec();
-  while (Date.now() - t0 < 90_000) {
-    await new Promise((r) => setTimeout(r, 2000));
-    if (await lapiHealth()) return { back: true, seconds: Math.round((Date.now() - t0) / 1000) };
-  }
-  return { back: false, seconds: 90 };
-}
-
 app.post('/api/hub/update', admin, async (c) => {
   await cscli(['hub', 'update'], false);
   audit(who(c), 'hub.update');
@@ -462,6 +457,71 @@ app.get('/api/waf', viewer, async (c) => {
   const engines = metrics?.appsec ?? metrics?.['appsec-engine'] ?? metrics ?? {};
   const waf = alerts.filter((a) => /appsec|vpatch|crs/i.test(a.scenario));
   return c.json({ metrics: metrics ?? {}, engines, alerts: waf.map(slim) });
+});
+
+// ---------------------------------------------------------------- ban policy, ignore rules, bouncer usage
+const backupInfo = (kind: 'profiles' | 'whitelists') => { const b = backupOf(kind); return b ? { at: b.at } : null; };
+
+app.get('/api/policy', viewer, async (c) => {
+  const live = await readCrowdsecFile('profiles');
+  const managed = !!live?.startsWith(POLICY_MARK);
+  const policy = managed ? cleanPolicy(getSetting<Policy>('policy', DEFAULT_POLICY)) : guessPolicy(live);
+  return c.json({ live, managed, policy, generated: renderPolicy(policy), backup: backupInfo('profiles') });
+});
+app.post('/api/policy/preview', viewer, async (c) => c.json({ generated: renderPolicy(cleanPolicy(await c.req.json())) }));
+app.put('/api/policy', admin, async (c) => {
+  const body = await c.req.json();
+  const raw = typeof body.raw === 'string';
+  const policy = raw ? null : cleanPolicy(body.policy);
+  const content = raw ? checkContent(body.raw) : renderPolicy(policy!);
+  if (raw && !content.trim()) return c.json({ error: 'profiles.yaml cannot be empty' }, 400);
+  const r = await applyFile('profiles', content, renderPolicy(DEFAULT_POLICY));
+  if (policy) setSetting('policy', policy);
+  audit(who(c), 'policy.apply', raw ? 'raw' : 'form', policy ?? undefined);
+  return c.json(r);
+});
+app.post('/api/policy/restore', admin, async (c) => {
+  const b = backupOf('profiles');
+  if (!b) return c.json({ error: 'no previous profiles.yaml kept' }, 404);
+  const r = await applyFile('profiles', b.content, renderPolicy(DEFAULT_POLICY));
+  audit(who(c), 'policy.restore', new Date(b.at).toISOString());
+  return c.json(r);
+});
+
+app.get('/api/ignore-rules', viewer, async (c) => {
+  const rules = getSetting<IgnoreRule[]>('ignoreRules', []);
+  const live = await readCrowdsecFile('whitelists');
+  return c.json({ rules, live, inSync: live === renderRules(rules), backup: backupInfo('whitelists') });
+});
+app.put('/api/ignore-rules', admin, async (c) => {
+  const rules = cleanRules((await c.req.json()).rules);
+  const r = await applyFile('whitelists', renderRules(rules), EMPTY_RULES);
+  setSetting('ignoreRules', rules);
+  audit(who(c), 'ignore-rules.apply', `${rules.filter((x) => x.enabled).length} rules`);
+  return c.json({ ...r, rules });
+});
+
+const ORIGINS: Record<string, string> = { CAPI: 'Community blocklist', crowdsec: 'CrowdSec detections', cscli: 'Manual and Argos', 'cscli-import': 'Imported', console: 'CrowdSec Console' };
+app.get('/api/bouncer-metrics', viewer, async (c) => {
+  const raw = await cscli(['metrics', 'show', 'bouncers']).catch((e) => ({ error: e.message }));
+  if (raw?.error) return c.json({ error: raw.error, bouncers: [] });
+  const sum = (o: any) => Object.values(o ?? {}).reduce((n: number, v) => n + (Number(v) || 0), 0);
+  const bouncers = Object.entries((raw?.bouncers ?? {}) as Record<string, Record<string, any>>).map(([name, origins]) => {
+    const processed = { bytes: 0, packets: 0 };
+    const rows = [];
+    for (const [origin, m] of Object.entries(origins)) {
+      if (m.processed) { processed.bytes += Number(m.processed.byte) || 0; processed.packets += Number(m.processed.packet) || 0; }
+      if (!m.dropped && !m.active_decisions) continue;
+      rows.push({
+        origin: origin || 'unknown',
+        label: ORIGINS[origin] ?? (origin.startsWith('lists:') ? origin.slice(6) : origin || 'unknown'),
+        bytes: Number(m.dropped?.byte) || 0, packets: Number(m.dropped?.packet) || 0, active: sum(m.active_decisions),
+      });
+    }
+    rows.sort((a, b) => b.packets - a.packets || b.active - a.active);
+    return { name, processed, origins: rows, dropped: rows.reduce((n, r) => n + r.packets, 0) };
+  });
+  return c.json({ bouncers });
 });
 
 app.post('/api/crowdsec/restart', admin, async (c) => {

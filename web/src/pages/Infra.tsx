@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import { can, type Role } from '../App';
+import BouncerUsage from './BouncerUsage';
 import { Badge, Button, Card, Confirm, ErrorBox, Modal, Skeleton, SkeletonList, SkeletonRows, Switch, ago, ask, cx, inputBase, inputCls, toast, useAsync } from '../ui';
 
 const COLORS = ['#22d3ee', '#a855f7', '#f43f5e', '#f59e0b', '#10b981', '#60a5fa', '#e879f9'];
@@ -109,6 +110,7 @@ function Engine() {
             m.last_heartbeat ? ago(m.last_heartbeat) : '—',
           ])} />
       </Card>
+      <BouncerUsage className="xl:col-span-2" />
       <Card title="Log sources read by CrowdSec" icon={<Cpu size={16} />} className="xl:col-span-2">
         <Table loading={loading} head={['Source', 'Lines read', 'Parsed', 'Unparsed', 'Poured to buckets']}
           rows={Object.entries(acq).map(([src, v]: [string, any]) => [

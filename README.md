@@ -25,6 +25,9 @@
 - **Bans**: ban or unban IPs, ranges, countries or AS numbers; bulk ban; captcha instead of ban
 - **IP profile**: history, sites and paths hit, reputation from CrowdSec CTI or AbuseIPDB (auto falls back when one runs out of quota)
 - **Blocklists**: Spamhaus DROP, FireHOL level 1, Tor exits, AbuseIPDB top offenders or any URL, refreshed on a schedule. Private ranges, your own IPs and Cloudflare are always skipped
+- **Ban policy**: ban length, longer bans for repeat offenders, a captcha before the ban for web attacks, or `profiles.yaml` by hand. CrowdSec checks the file (`crowdsec -t`) before it restarts into it, and a file it refuses or does not come back up with is put back
+- **Ignore rules**: requests that never count toward a ban (health checks, your app's API, a monitor), by path, host, user agent, method or status
+- **Bouncer usage**: what each bouncer dropped, per decision source
 - **Web firewall**: CrowdSec AppSec metrics, blocked requests and the rules that fired
 - **Hub store**: browse and install collections, scenarios, parsers and AppSec rules; upgrade everything with a dry-run preview; CrowdSec restarts on its own
 - **Simulation mode** per scenario, to try a rule without banning anyone
@@ -137,6 +140,7 @@ Grafana's Discord integration only fills the embed title. Point a **webhook** co
 - **Argos never holds the Docker socket.** A second container from the same image, `argos-docker-proxy`, does, and it only lets through:
   - an exec in the CrowdSec container whose argv passes the `cscli` allow-list (`server/src/argv.ts`), checked again there, never a shell
   - reading back the execs it created, and a restart of the CrowdSec container
+  - reading and writing two files in the CrowdSec config, `profiles.yaml` and `parsers/s02-enrich/zz-argos-whitelists.yaml` (64 KB, text only), and running `crowdsec -t` on it
 
   Everything else (other containers, `create`, `json`, images, volumes) gets a 403, and the proxy sits on an internal-only network with a token. If Argos itself were compromised, the worst it can do is run the allowed `cscli` commands.
 - Keep it off the open internet when you can: bind to localhost or a VPN address, or put an IP allow-list or SSO in front

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, Link2, ListX, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { can, type Role } from '../App';
+import BouncerUsage from './BouncerUsage';
 import { AnimatedNumber, Badge, Button, Field, Modal, PageHeader, SkeletonCard, Switch, ago, ask, cx, inputBase, inputCls, toast, useAsync } from '../ui';
 
 interface Blocklist {
@@ -63,6 +64,8 @@ export default function Blocklists({ role }: { role: Role }) {
           {error && <div className="text-sm text-rose-300">{error}</div>}
         </div>
       </div>
+
+      <BouncerUsage />
 
       <div className="stagger grid gap-5 lg:grid-cols-2">
         {!all && !error && [0, 1, 2, 3].map((i) => <SkeletonCard key={i} rows={2} />)}

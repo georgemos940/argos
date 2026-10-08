@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, Ban, Bell, BookOpen, ExternalLink, Flame, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
+  Activity, Ban, Bell, BookOpen, ExternalLink, EyeOff, Flame, Gavel, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
 } from 'lucide-react';
 import { api, type Me } from './api';
 import { AskHost, cx } from './ui';
@@ -11,6 +11,8 @@ import Alerts from './pages/Alerts';
 import Decisions from './pages/Decisions';
 import IpProfile from './pages/IpProfile';
 import Allowlists from './pages/Allowlists';
+import PolicyPage from './pages/Policy';
+import IgnoreRules from './pages/IgnoreRules';
 import Blocklists from './pages/Blocklists';
 import Tools from './pages/Tools';
 import Waf from './pages/Waf';
@@ -36,6 +38,8 @@ const NAV: { group: string; items: Item[] }[] = [
     { to: '/bans', label: 'Bans', icon: Ban, min: 'viewer', count: 'bans', tone: 'bg-rose-500/15 text-rose-200 ring-rose-400/30' },
     { to: '/blocklists', label: 'Blocklists', icon: ListX, min: 'viewer' },
     { to: '/allowlists', label: 'Allowlists', icon: ListChecks, min: 'viewer' },
+    { to: '/ignore-rules', label: 'Ignore rules', icon: EyeOff, min: 'viewer' },
+    { to: '/policy', label: 'Ban policy', icon: Gavel, min: 'viewer' },
   ] },
   { group: 'System', items: [
     { to: '/infra', label: 'Infrastructure', icon: Server, min: 'viewer' },
@@ -273,6 +277,8 @@ export default function App() {
             <Route path="/waf" element={<Waf />} />
             <Route path="/tools" element={<Tools role={role} />} />
             <Route path="/allowlists" element={<Allowlists role={role} />} />
+            <Route path="/ignore-rules" element={<IgnoreRules role={role} />} />
+            <Route path="/policy" element={<PolicyPage role={role} />} />
             <Route path="/infra" element={<Infra role={role} />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/audit" element={<Audit />} />

@@ -7,6 +7,9 @@ Versions follow [semver](https://semver.org). Docker images are tagged with the 
 - Argos no longer holds the Docker socket: `argos-docker-proxy` does and only lets allowed `cscli` execs and a CrowdSec restart through
 - Notification channels: Telegram, Slack, ntfy, email, JSON webhook with an HMAC signature
 - Daily / weekly summary to Discord and any channel
+- Ban policy page: ban length, escalation for repeat offenders, captcha first for web attacks, raw `profiles.yaml`; checked with `crowdsec -t` and rolled back if CrowdSec refuses it
+- Ignore rules: requests by path, host, user agent, method or status that never count toward a ban
+- Bouncer usage: dropped packets and bytes per bouncer and decision source
 
 ## 1.0.0
 
