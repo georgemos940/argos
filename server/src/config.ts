@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 const env = (name: string, fallback?: string): string => {
   const v = process.env[name] ?? fallback;
   if (v === undefined) throw new Error(`missing env ${name}`);
@@ -6,7 +8,10 @@ const env = (name: string, fallback?: string): string => {
 
 const demo = process.env.DEMO === '1' || process.env.DEMO === 'true';
 
+const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+
 export const config = {
+  version: pkg.version,
   // generated data, no crowdsec needed, read-only
   demo,
   port: Number(env('PORT', '3000')),

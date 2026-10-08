@@ -1,21 +1,31 @@
 # Changelog
 
-Versions follow [semver](https://semver.org). Docker images are tagged with the version (`1.0.0`, `1.0`) and `latest` follows `main`.
+Versions follow [semver](https://semver.org). Docker images are tagged with the version (`1.1.0`, `1.1`) and `latest` follows `main`.
 
-## Unreleased
+## 1.1.0
 
-- Argos no longer holds the Docker socket: `argos-docker-proxy` does and only lets allowed `cscli` execs and a CrowdSec restart through
-- Notification channels: Telegram, Slack, ntfy, email, JSON webhook with an HMAC signature
-- Daily / weekly summary to Discord and any channel
-- Ban policy page: ban length, escalation for repeat offenders, captcha first for web attacks, raw `profiles.yaml`; checked with `crowdsec -t` and rolled back if CrowdSec refuses it
-- Ignore rules: requests by path, host, user agent, method or status that never count toward a ban
-- Bouncer usage: dropped packets and bytes per bouncer and decision source
+### New
+
+- **False positives**: bans that look like a real visitor or your own app (home network, mostly 2xx answers, Next.js prefetches, the same app path from several users, unbanned before), each with its reasons and allow / unban / ignore rule in one click
+- **Ban policy**: ban length, longer bans for repeat offenders, captcha first for web attacks, or `profiles.yaml` by hand. Checked with `crowdsec -t` before CrowdSec restarts into it, and put back if it refuses it or does not come back up
+- **Ignore rules**: requests by path, host, user agent, method or status that never count toward a ban
+- **Several CrowdSec servers** in one Argos: instance switcher, cscli through each server's docker proxy, alerts from all of them to the channels, blocklists to all of them, the audit log says where
+- **Single sign-on** over OpenID Connect: link accounts or create them on first sign-in, email domain limits, roles from a groups claim
+- **Passkeys**: sign in with a fingerprint, face or device PIN; they satisfy Require 2FA
+- **API tokens** (viewer or operator, with an expiry) for scripts: `Authorization: Bearer argos_…`
+- **Notification channels**: Telegram, Slack, ntfy, email, JSON webhook with an HMAC signature, and a daily / weekly summary
+- **Bouncer usage**: dropped packets and bytes per bouncer and decision source
 - Installable as an app (PWA), opens offline to the last shell
-- False positives page: bans that look like real visitors or the app itself, with the reasons and allow / unban / ignore rule in one click
-- Several CrowdSec servers in one Argos: instance switcher, per-instance cscli through each server's docker proxy, alerts from all of them to the channels, blocklists to all of them, audit log says where
-- Single sign-on over OpenID Connect: account linking or creation on first sign-in, email domain limits, roles from a groups claim
-- Passkeys (WebAuthn): add them in Settings, sign in without a password; they satisfy Require 2FA. `PUBLIC_URL` pins the origin they are bound to
-- API tokens (viewer or operator, with expiry) for scripts: `Authorization: Bearer argos_…`
+
+### Security
+
+- Argos no longer holds the Docker socket: `argos-docker-proxy` does and only lets allowed `cscli` execs, a CrowdSec restart, `crowdsec -t` and Argos' own two config files through
+
+### Upgrading from 1.0
+
+- Nothing breaks, the database updates itself on start
+- Recommended: add the `argos-docker-proxy` service from `docker-compose.yml`, put `DOCKER_PROXY_TOKEN` (`openssl rand -hex 32`) in `.env` and drop the `docker.sock` mount from `argos`. Without it Argos keeps using the socket as before
+- Using passkeys or SSO: set `PUBLIC_URL` to the address people open
 
 ## 1.0.0
 

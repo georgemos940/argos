@@ -56,6 +56,10 @@
     <td><img src="docs/screenshots/waf.png" alt="Web firewall"></td>
     <td><img src="docs/screenshots/bans.png" alt="Bans"></td>
   </tr>
+  <tr>
+    <td><img src="docs/screenshots/false-positives.png" alt="False positives"></td>
+    <td><img src="docs/screenshots/ban-policy.png" alt="Ban policy"></td>
+  </tr>
 </table>
 
 ## Try it in 10 seconds

@@ -1,3 +1,4 @@
+import { config } from './config.js';
 import { registerMachine } from './cscli.js';
 import { current } from './instances.js';
 
@@ -21,7 +22,7 @@ export interface Alert {
 const tokens = new Map<string, { value: string; expires: number }>();
 
 // lapi wants a "name/version" user agent, otherwise reports a wrong password
-const UA = { 'User-Agent': 'argos/1.0.0' };
+const UA = { 'User-Agent': `argos/${config.version}` };
 
 const registered = new Set<string>();
 
