@@ -273,11 +273,11 @@ Grafana's Discord integration only fills the embed title. Point a **webhook** co
 ## Security
 
 ```mermaid
-flowchart LR
-    B[Browser] -->|HTTPS| A[Argos]
+flowchart TB
+    B[Browser] -->|HTTPS, cookie + same-origin header| A[Argos]
     A -->|machine login| L[CrowdSec LAPI]
-    A -->|token| P[docker proxy]
-    P -->|allow-list only| C[CrowdSec]
+    A -->|token, internal network| P[argos-docker-proxy]
+    P -->|allow-listed cscli, restart, two config files| C[CrowdSec container]
 ```
 
 - **Argos never holds the Docker socket.** `argos-docker-proxy` does, from the same image, and only lets through:
