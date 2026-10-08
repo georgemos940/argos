@@ -26,6 +26,7 @@
 - **IP profile**: history, sites and paths hit, reputation from CrowdSec CTI or AbuseIPDB (auto falls back when one runs out of quota)
 - **Blocklists**: Spamhaus DROP, FireHOL level 1, Tor exits, AbuseIPDB top offenders or any URL, refreshed on a schedule. Private ranges, your own IPs and Cloudflare are always skipped
 - **Ban policy**: ban length, longer bans for repeat offenders, a captcha before the ban for web attacks, or `profiles.yaml` by hand. CrowdSec checks the file (`crowdsec -t`) before it restarts into it, and a file it refuses or does not come back up with is put back
+- **False positives**: bans that look like a real visitor or your own app (home network, mostly 2xx answers, Next.js prefetches, the same app path from several users, unbanned before), each with its reasons and one-click allow, unban or ignore rule
 - **Ignore rules**: requests that never count toward a ban (health checks, your app's API, a monitor), by path, host, user agent, method or status
 - **Bouncer usage**: what each bouncer dropped, per decision source
 - **API tokens** for scripts, and installable as an app (PWA)

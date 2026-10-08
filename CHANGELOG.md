@@ -11,6 +11,7 @@ Versions follow [semver](https://semver.org). Docker images are tagged with the 
 - Ignore rules: requests by path, host, user agent, method or status that never count toward a ban
 - Bouncer usage: dropped packets and bytes per bouncer and decision source
 - Installable as an app (PWA), opens offline to the last shell
+- False positives page: bans that look like real visitors or the app itself, with the reasons and allow / unban / ignore rule in one click
 - API tokens (viewer or operator, with expiry) for scripts: `Authorization: Bearer argos_…`
 
 ## 1.0.0

@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Alert } from './lapi.js';
 import { slim, summarize } from './stats.js';
+import { findSuspects } from './falsepos.js';
 import { DEFAULT_POLICY, cleanPolicy, renderPolicy, renderRules, type IgnoreRule } from './policy.js';
 
 // DEMO=1: the whole ui on generated data, no crowdsec, no docker, read-only
@@ -67,6 +68,21 @@ const demoRules: IgnoreRule[] = [
   { id: 'health', name: 'Uptime checks', enabled: true, conditions: [{ field: 'path', op: 'equals', value: '/healthz' }] },
   { id: 'next', name: 'App assets', enabled: true, conditions: [{ field: 'host', op: 'equals', value: 'shop.example.com' }, { field: 'path', op: 'startsWith', value: '/_next/' }] },
   { id: 'bots', name: 'Search engine crawlers on 404s', enabled: false, conditions: [{ field: 'user_agent', op: 'regex', value: '(?i)(googlebot|bingbot)' }, { field: 'status', op: 'equals', value: '404' }] },
+];
+
+// a few real visitors among the scanners, for the false positives page
+const visitor = (ip: string, cn: string, as: string, scenario: string, reqs: [string, string, string][], hoursAgo: number): Alert => {
+  const iso = new Date(now() - hoursAgo * 3600_000).toISOString();
+  return { id: nextId++, scenario, message: '', events_count: reqs.length * 3, start_at: iso, stop_at: iso, created_at: iso,
+    source: { scope: 'Ip', value: ip, ip, cn, as_name: as },
+    decisions: [{ id: nextId, type: 'ban', scope: 'Ip', value: ip, duration: '3h12m4s', origin: 'crowdsec' }],
+    events: reqs.map(([host, path, status]) => ({ timestamp: iso, meta: [{ key: 'target_fqdn', value: host }, { key: 'http_path', value: path }, { key: 'http_status', value: status }] })) };
+};
+const visitors = [
+  visitor('2a02:587:4c1e::17', 'GR', 'Cosmote', 'crowdsecurity/http-probing', [['app.example.com', '/dashboard/orders?_rsc=1x9fk', '404'], ['app.example.com', '/dashboard/billing?_rsc=1x9fk', '404'], ['app.example.com', '/dashboard/team?_rsc=8ka2c', '404']], 2),
+  visitor('94.66.21.140', 'GR', 'Vodafone-panafon Hellenic Telecommunications', 'LePresidente/http-generic-403-bf', [['shop.example.com', '/api/cart/items', '403'], ['shop.example.com', '/api/session', '403'], ['shop.example.com', '/api/cart', '200']], 5),
+  visitor('85.74.112.9', 'GR', 'Wind Hellas Telecommunications', 'LePresidente/http-generic-403-bf', [['shop.example.com', '/api/cart', '403'], ['shop.example.com', '/api/wishlist', '403']], 9),
+  visitor('62.38.201.77', 'GR', 'Hellas Online', 'crowdsecurity/http-probing', [['shop.example.com', '/api/products/9921', '404'], ['shop.example.com', '/api/products/9922', '404']], 20),
 ];
 
 const routes: Record<string, (c: any) => unknown> = {
@@ -147,6 +163,7 @@ const routes: Record<string, (c: any) => unknown> = {
     { origin: 'CAPI', label: 'Community blocklist', bytes: 91790, packets: 1930, active: 22719 },
     { origin: 'cscli', label: 'Manual and Argos', bytes: 40120, packets: 883, active: 6349 },
   ] }] }),
+  '/api/false-positives': () => findSuspects([...visitors, ...alerts], { active: new Map(visitors.map((v) => [v.source.value, { id: v.decisions![0].id, type: 'ban', duration: '3h12m4s' }])) }),
   '/api/tokens': () => [
     { id: 2, name: 'home-assistant', prefix: 'argos_Qm3xT', role: 'viewer', created_by: 'demo', created_at: now() - 20 * 86400_000, expires_at: now() + 70 * 86400_000, last_used_at: now() - 90_000, last_ip: '192.168.1.20' },
     { id: 1, name: 'fail2ban-bridge', prefix: 'argos_9Kd2w', role: 'operator', created_by: 'demo', created_at: now() - 60 * 86400_000, expires_at: null, last_used_at: now() - 3 * 3600_000, last_ip: '10.0.0.4' }],

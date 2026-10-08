@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { EyeOff, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import { api } from '../api';
 import { can, type Role } from '../App';
@@ -34,7 +35,24 @@ export default function IgnoreRules({ role }: { role: Role }) {
   const admin = can(role, 'admin');
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (data) setRules(data.rules); }, [data]);
+  // a rule drafted on the false positives page arrives as router state and stays on top of whatever loads until applied
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [draft] = useState(() => {
+    const d = (location.state as { add?: Omit<Rule, 'id' | 'enabled'> } | null)?.add;
+    return d ? { ...(d as Rule), id: newId(), enabled: true } : null;
+  });
+  const added = useRef<Rule | null>(draft);
+  useEffect(() => {
+    if (!draft) return;
+    navigate('.', { replace: true, state: null });
+    toast('Rule added at the bottom, check it and Apply');
+  }, [draft, navigate]);
+  useEffect(() => {
+    if (!data) return;
+    const a = added.current;
+    setRules(a && !data.rules.some((r) => r.id === a.id) ? [...data.rules, a] : data.rules);
+  }, [data]);
 
   const dirty = !!data && !!rules && JSON.stringify(rules) !== JSON.stringify(data.rules);
   const edit = (id: string, patch: Partial<Rule>) => setRules((rs) => rs!.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -50,6 +68,7 @@ export default function IgnoreRules({ role }: { role: Role }) {
     try {
       const r = await api<{ changed: boolean; seconds: number }>('/ignore-rules', { method: 'PUT', json: { rules } });
       toast(r.changed ? `Ignore rules live, CrowdSec back in ${r.seconds}s` : 'Saved, nothing changed in CrowdSec');
+      added.current = null;
       reload();
     } catch (e: any) { toast(e.message, 'err'); }
     finally { setBusy(false); }
@@ -61,7 +80,7 @@ export default function IgnoreRules({ role }: { role: Role }) {
         subtitle="Requests that should never count toward a ban: health checks, your app's own API calls, a monitor. They are dropped before any scenario sees them."
         actions={admin && rules && (
           <div className="flex gap-2">
-            {dirty && <Button tone="ghost" disabled={busy} onClick={() => setRules(data!.rules)}>Discard</Button>}
+            {dirty && <Button tone="ghost" disabled={busy} onClick={() => { added.current = null; setRules(data!.rules); }}>Discard</Button>}
             <Button tone="primary" disabled={busy || (!dirty && !!data?.inSync)} onClick={save}>
               {busy ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} {busy ? 'Checking and restarting…' : 'Apply'}
             </Button>

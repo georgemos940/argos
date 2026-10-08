@@ -32,6 +32,7 @@ import {
 } from './notifier.js';
 import { reputation, type RepMode } from './reputation.js';
 import { mountDemo } from './demo.js';
+import { findSuspects } from './falsepos.js';
 import {
   digestMessage, digestSettings, publicChannels, removeChannel, saveChannel, send as sendToChannel, sendDigest, startDigest,
   listChannels, type DigestSettings,
@@ -334,6 +335,42 @@ app.post('/api/allowlists/:name/:op', operator, async (c) => {
   await cscli(args, false);
   audit(who(c), `allowlist.${op}`, name, { values: clean, comment });
   return c.json({ ok: true, count: clean.length });
+});
+
+// ---------------------------------------------------------------- false positives
+const FP_LIST = 'argos-false-positives';
+const dismissedFp = () => getSetting<Record<string, number>>('fp.dismissed', {});
+
+app.get('/api/false-positives', viewer, async (c) => {
+  const [alerts, banned] = await Promise.all([recentAlerts('7d'), getAlerts({ has_active_decision: true, limit: 3000 })]);
+  const active = new Map<string, { id: number; type: string; duration: string }>();
+  for (const a of banned) for (const d of a.decisions ?? []) if (d.scope === 'Ip' && !active.has(d.value)) active.set(d.value, { id: d.id, type: d.type, duration: d.duration });
+  const unbanned = new Set<string>();
+  for (const r of db.prepare("SELECT target FROM audit WHERE action = 'decision.unban' AND ts > ?").all(Date.now() - 30 * 86400_000) as { target: string }[])
+    for (const v of String(r.target).split(',')) unbanned.add(v);
+  const dismissed = new Set(Object.entries(dismissedFp()).filter(([, until]) => until > Date.now()).map(([k]) => k));
+  return c.json(findSuspects(alerts, { unbanned, dismissed, active }));
+});
+app.post('/api/false-positives/dismiss', operator, async (c) => {
+  const { key } = await c.req.json();
+  if (typeof key !== 'string' || !/^(ip|spot):.{1,300}$/.test(key)) return c.json({ error: 'bad key' }, 400);
+  const now = Date.now();
+  const next = Object.fromEntries(Object.entries(dismissedFp()).filter(([, until]) => until > now));
+  next[key] = now + 30 * 86400_000;
+  setSetting('fp.dismissed', next);
+  audit(who(c), 'fp.dismiss', key);
+  return c.json({ ok: true });
+});
+// allowlist it in a list of its own and lift the ban
+app.post('/api/false-positives/allow', operator, async (c) => {
+  const { ip: value, note } = await c.req.json();
+  if (typeof value !== 'string' || !ENTRY.test(value) || value.includes('/')) return c.json({ error: 'bad ip' }, 400);
+  const lists = ((await cscli(['allowlists', 'list'])) ?? []) as { name: string }[];
+  if (!lists.some((l) => l.name === FP_LIST)) await cscli(['allowlists', 'create', FP_LIST, '--description', 'false positives confirmed in argos'], false);
+  await cscli(['allowlists', 'add', FP_LIST, value, '--comment', String(note || `false positive, ${who(c)}`).replace(/[\r\n]/g, ' ').slice(0, 100)], false);
+  const r = await deleteDecisionsFor('ip', value);
+  audit(who(c), 'fp.allow', value, { note });
+  return c.json({ ok: true, unbanned: Number(r?.nbDeleted ?? 0) });
 });
 
 // ---------------------------------------------------------------- infrastructure

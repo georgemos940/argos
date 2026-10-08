@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, Ban, Bell, BookOpen, Download, ExternalLink, EyeOff, Flame, Gavel, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
+  Activity, Ban, Bell, BookOpen, Download, ScanSearch, ExternalLink, EyeOff, Flame, Gavel, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
 } from 'lucide-react';
 import { api, type Me } from './api';
 import { AskHost, cx } from './ui';
@@ -13,6 +13,7 @@ import IpProfile from './pages/IpProfile';
 import Allowlists from './pages/Allowlists';
 import PolicyPage from './pages/Policy';
 import IgnoreRules from './pages/IgnoreRules';
+import FalsePositives from './pages/FalsePositives';
 import Blocklists from './pages/Blocklists';
 import Tools from './pages/Tools';
 import Waf from './pages/Waf';
@@ -33,6 +34,7 @@ const NAV: { group: string; items: Item[] }[] = [
     { to: '/', label: 'Overview', icon: LayoutDashboard, min: 'viewer' },
     { to: '/alerts', label: 'Alerts', icon: Activity, min: 'viewer', count: 'alerts', tone: 'bg-amber-400/15 text-amber-200 ring-amber-400/30' },
     { to: '/waf', label: 'Web firewall', icon: Flame, min: 'viewer' },
+    { to: '/false-positives', label: 'False positives', icon: ScanSearch, min: 'viewer' },
   ] },
   { group: 'Respond', items: [
     { to: '/bans', label: 'Bans', icon: Ban, min: 'viewer', count: 'bans', tone: 'bg-rose-500/15 text-rose-200 ring-rose-400/30' },
@@ -299,6 +301,7 @@ export default function App() {
             <Route path="/tools" element={<Tools role={role} />} />
             <Route path="/allowlists" element={<Allowlists role={role} />} />
             <Route path="/ignore-rules" element={<IgnoreRules role={role} />} />
+            <Route path="/false-positives" element={<FalsePositives role={role} />} />
             <Route path="/policy" element={<PolicyPage role={role} />} />
             <Route path="/infra" element={<Infra role={role} />} />
             <Route path="/notifications" element={<Notifications />} />
