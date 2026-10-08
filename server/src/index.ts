@@ -26,6 +26,7 @@ import {
   EMBED_FIELDS, defaultEmbed, notifySettings, onAlert, sendDiscord, startNotifier, vars, type EmbedStyle, type NotifySettings,
 } from './notifier.js';
 import { reputation, type RepMode } from './reputation.js';
+import { mountDemo } from './demo.js';
 
 type Env = { Variables: { user: User } };
 const app = new Hono<Env>();
@@ -44,7 +45,7 @@ app.onError((err, c) => {
 
 const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: https:",
-  "font-src 'self'", "connect-src 'self'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'",
+  "font-src 'self' data:", "connect-src 'self'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'",
 ].join('; ');
 
 app.use('*', async (c, next) => {
@@ -78,9 +79,11 @@ app.use('/api/*', async (c, next) => {
   return next();
 });
 
+if (config.demo) mountDemo(app);
+
 // ---------------------------------------------------------------- auth
 const setupToken = randomBytes(12).toString('hex');
-if (userCount() === 0) console.log(`[setup] no users yet. Setup token: ${setupToken}`);
+if (userCount() === 0 && !config.demo) console.log(`[setup] no users yet. Setup token: ${setupToken}`);
 
 app.get('/api/auth/me', (c) => {
   const s = sessionFor(c);
@@ -635,6 +638,8 @@ let indexHtml = '';
 try { indexHtml = readFileSync('./dist/web/index.html', 'utf8'); } catch { indexHtml = '<p>web app not built</p>'; }
 app.get('*', (c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'not found' }, 404) : c.html(indexHtml)));
 
-startNotifier();
-startBlocklists();
+if (!config.demo) {
+  startNotifier();
+  startBlocklists();
+}
 serve({ fetch: app.fetch, port: config.port, hostname: '0.0.0.0' }, (i) => console.log(`Argos on :${i.port}`));
