@@ -54,7 +54,7 @@
 No CrowdSec needed: the demo runs on generated data, with attacks arriving live on the map. Nothing can be changed.
 
 ```sh
-docker run --rm -p 3000:3000 -e DEMO=1 -e COOKIE_SECURE=false ghcr.io/georgemos940/crowdsec-argos-ui:latest
+docker run --rm -p 3000:3000 -e DEMO=1 ghcr.io/georgemos940/crowdsec-argos-ui:latest
 ```
 
 Open `http://localhost:3000`.
@@ -156,7 +156,7 @@ SESSION_SECRET=dev LAPI_USER=... LAPI_PASSWORD=... LAPI_URL=http://localhost:808
 
 ```sh
 npm test              # blocklist parser, ssrf guard, roles, cscli allow-list, hub upgrade plan
-DEMO=1 COOKIE_SECURE=false npm start   # after npm run build
+DEMO=1 npm start      # after npm run build
 ```
 
 Stack: Node 22, Hono, node:sqlite, React 19, Vite, Tailwind 4, Recharts, d3-geo.
