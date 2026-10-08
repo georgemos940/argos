@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { KeyRound, ShieldCheck } from 'lucide-react';
 import { api, type Me } from '../api';
 import { Button, ErrorBox, Field, inputCls } from '../ui';
@@ -10,7 +11,14 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const mode = me.setup ? 'setup' : me.needsTotp ? 'totp' : 'login';
+  const mode = me.setup ? 'setup' : me.needsTotp ? 'totp' : me.mustEnroll ? 'enroll' : 'login';
+  const [enroll, setEnroll] = useState<{ secret: string; uri: string } | null>(null);
+  const [qr, setQr] = useState('');
+  useEffect(() => {
+    if (mode !== 'enroll' || enroll) return;
+    api<{ secret: string; uri: string }>('/auth/totp/enroll', { method: 'POST' }).then(setEnroll).catch((e) => setError(e.message));
+  }, [mode, enroll]);
+  useEffect(() => { if (enroll) QRCode.toDataURL(enroll.uri, { margin: 1, width: 200 }).then(setQr); }, [enroll]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,6 +27,7 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
     try {
       if (mode === 'setup') await api('/auth/setup', { method: 'POST', json: { token, username, password } });
       else if (mode === 'login') await api('/auth/login', { method: 'POST', json: { username, password } });
+      else if (mode === 'enroll') await api('/auth/totp/confirm', { method: 'POST', json: { secret: enroll?.secret, code } });
       else await api('/auth/totp', { method: 'POST', json: { code } });
       onDone();
     } catch (err: any) {
@@ -39,7 +48,8 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
           </div>
           <h1 className="mt-6 font-display text-3xl font-semibold text-white"><span className="text-gradient">Argos</span></h1>
           <p className="mt-1 text-sm text-slate-500">
-            {mode === 'setup' ? 'Create the first admin account' : mode === 'totp' ? 'Two-factor authentication' : 'Sign in to continue'}
+            {mode === 'setup' ? 'Create the first admin account' : mode === 'totp' ? 'Two-factor authentication'
+              : mode === 'enroll' ? 'This panel requires two-factor authentication' : 'Sign in to continue'}
           </p>
         </div>
         <form onSubmit={submit} className="glass space-y-4 p-6">
@@ -48,7 +58,15 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
               <input className={inputCls} value={token} onChange={(e) => setToken(e.target.value)} autoFocus />
             </Field>
           )}
-          {mode !== 'totp' ? (
+          {mode === 'enroll' && (
+            <div className="flex items-start gap-4">
+              {qr ? <img src={qr} className="h-32 w-32 shrink-0 rounded-xl bg-white p-1.5" alt="QR code" /> : <div className="h-32 w-32 shrink-0 rounded-xl skeleton" />}
+              <div className="min-w-0 text-xs text-slate-400">Scan it with an authenticator app (Google Authenticator, Authy, 1Password), or enter the key:
+                <div className="mt-2 font-mono break-all text-cyan-200">{enroll?.secret ?? '…'}</div>
+              </div>
+            </div>
+          )}
+          {mode !== 'totp' && mode !== 'enroll' ? (
             <>
               <Field label="Username"><input className={inputCls} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus={mode === 'login'} /></Field>
               <Field label="Password" hint={mode === 'setup' ? 'At least 10 characters.' : undefined}>
@@ -63,8 +81,8 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
           )}
           <ErrorBox error={error} />
           <Button tone="primary" className="w-full" disabled={busy}>
-            {mode === 'totp' ? <ShieldCheck size={16} /> : <KeyRound size={16} />}
-            {mode === 'setup' ? 'Create admin' : mode === 'totp' ? 'Verify' : 'Sign in'}
+            {mode === 'totp' || mode === 'enroll' ? <ShieldCheck size={16} /> : <KeyRound size={16} />}
+            {mode === 'setup' ? 'Create admin' : mode === 'totp' ? 'Verify' : mode === 'enroll' ? 'Turn on 2FA' : 'Sign in'}
           </Button>
         </form>
       </div>

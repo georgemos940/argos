@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { KeyRound, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
 import { api, type Me } from '../api';
 import { can } from '../App';
-import { Badge, Button, Card, ErrorBox, Field, Modal, SkeletonList, ago, ask, inputCls, toast, useAsync } from '../ui';
+import { Badge, Button, Card, ErrorBox, Field, Modal, SkeletonList, Switch, ago, ask, inputCls, toast, useAsync } from '../ui';
 
 export default function Settings({ me, reload }: { me: Me; reload: () => void }) {
   const admin = can(me.user!.role, 'admin');
@@ -93,6 +93,11 @@ function TwoFactor({ enabled, reload }: { enabled: boolean; reload: () => void }
 
 function UsersCard({ me }: { me: string }) {
   const { data, reload } = useAsync(() => api<{ id: number; username: string; role: string; totp: number; created_at: number }[]>('/users'), []);
+  const sec = useAsync(() => api<{ require2fa: boolean }>('/settings'), []);
+  const setRequire2fa = async (v: boolean) => {
+    try { await api('/settings', { method: 'PUT', json: { require2fa: v } }); toast(v ? '2FA is now required for everyone' : '2FA is optional again'); sec.reload(); }
+    catch (e: any) { toast(e.message, 'err'); }
+  };
   const [open, setOpen] = useState(false);
   const patch = async (id: number, body: object) => { await api(`/users/${id}`, { method: 'PATCH', json: body }); toast('Updated'); reload(); };
   const del = async (id: number, name: string) => {
@@ -104,6 +109,13 @@ function UsersCard({ me }: { me: string }) {
   return (
     <Card title="Users" icon={<Users size={16} />} actions={<Button onClick={() => setOpen(true)}><UserPlus size={14} /> Add</Button>}>
       <p className="mb-3 text-xs text-slate-500">viewer: read only · operator: ban, unban, allowlists, Cloudflare · admin: everything</p>
+      <div className="mb-4 flex items-center justify-between gap-4 rounded-xl bg-white/[0.02] px-4 py-3 ring-1 ring-white/5">
+        <div>
+          <div className="text-sm text-slate-100">Require 2FA for everyone</div>
+          <div className="text-xs text-slate-500">Accounts without it must set it up at their next sign-in before they can see anything.</div>
+        </div>
+        <Switch checked={!!sec.data?.require2fa} onChange={setRequire2fa} label="Require 2FA" />
+      </div>
       {!data && <SkeletonList rows={3} avatar />}
       <ul className="divide-y divide-white/5">
         {(data ?? []).map((u) => (

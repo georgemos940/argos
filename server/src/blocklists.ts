@@ -1,6 +1,8 @@
 import { getSetting, setSetting, audit } from './db.js';
 import { deleteDecisionsByScenario, pushListDecisions } from './lapi.js';
 import { config } from './config.js';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 
 export interface Blocklist {
   id: string;
@@ -115,6 +117,31 @@ export function parse(text: string, cf: { v4: [number, number][]; v6: string[] }
   return { values: [...out], skipped };
 }
 
+// list urls are typed by an admin: never let them reach the lapi, docker, the lan or cloud metadata
+const LOCAL_V6 = /^(::1?$|fc|fd|fe[89ab]|::ffff:)/i;
+function isLocal(addr: string): boolean {
+  if (addr.includes(':')) {
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(addr);
+    return mapped ? isLocal(mapped[1]) : LOCAL_V6.test(addr);
+  }
+  const r = v4Range(addr);
+  return !r || overlaps(r, RESERVED_V4);
+}
+
+async function publicFetch(url: string, hops = 0): Promise<Response> {
+  const u = new URL(url);
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('only http(s) lists');
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  const addrs = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
+  if (!addrs.length || addrs.some(isLocal)) throw new Error('list url points to a private address');
+  const res = await fetch(u, { headers: { 'User-Agent': 'argos/1.0' }, redirect: 'manual', signal: AbortSignal.timeout(60_000) });
+  if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+    if (hops >= 3) throw new Error('too many redirects');
+    return publicFetch(new URL(res.headers.get('location')!, u).toString(), hops + 1);
+  }
+  return res;
+}
+
 async function download(b: Blocklist): Promise<string> {
   if (b.url === 'abuseipdb') {
     const key = getSetting<string>('abuse.key', '');
@@ -123,7 +150,7 @@ async function download(b: Blocklist): Promise<string> {
     if (!res.ok) throw new Error(`AbuseIPDB ${res.status}${res.status === 429 ? ' (daily download limit)' : ''}`);
     return res.text();
   }
-  const res = await fetch(b.url, { headers: { 'User-Agent': 'argos/1.0' }, signal: AbortSignal.timeout(60_000) });
+  const res = await publicFetch(b.url);
   if (!res.ok) throw new Error(`download ${res.status}`);
   const text = await res.text();
   if (text.length > 20_000_000) throw new Error('list is larger than 20 MB');

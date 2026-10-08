@@ -97,6 +97,7 @@ Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
 | `CF_API_TOKEN` / `CF_ZONE_IDS` | | optional, Cloudflare Under Attack switch. Token needs Zone Settings edit |
 | `ZONE_RPS_QUERY` | | optional, Prometheus query with a `zone` label for the Cloudflare chart |
 | `COOKIE_SECURE` | `true` | set `false` only when serving over plain http |
+| `TRUST_PROXY` | `false` | `true` behind a reverse proxy, so login rate limits and the audit log see the real client IP from `X-Real-IP` / `X-Forwarded-For`. Leave `false` when the panel is reached directly, or anyone can fake their address |
 
 API keys for CrowdSec CTI and AbuseIPDB, the Discord webhooks and blocklists are set in the UI.
 
@@ -109,8 +110,16 @@ Grafana's Discord integration only fills the embed title. Point a **webhook** co
 - The panel mounts the Docker socket. That is root on the host, so:
   - only an allow-list of `cscli` commands can run (`server/src/cscli.ts`); the explain tool passes the log line as a single argument, never through a shell
   - do not expose it to the internet. Bind it to localhost or a VPN address and put it behind a reverse proxy with an IP allow-list or SSO
-- Passwords are hashed with scrypt, sessions are HTTP-only cookies, failed logins are rate limited per IP
+- Passwords are hashed with scrypt; sessions are `__Host-` HTTP-only, `SameSite=Strict` cookies that end on password or 2FA changes
+- Optional **Require 2FA for everyone** (Settings → Users): accounts without TOTP must enrol before they see anything. TOTP codes cannot be replayed
+- Failed logins are limited per IP and per username; unknown usernames take as long as wrong passwords
+- Every write needs a same-origin request header and a matching `Origin`, on top of the cookie, so CSRF is refused twice
+- Strict security headers: CSP without inline scripts, HSTS, `frame-ancestors 'none'`, no-store on the API
+- Blocklist URLs cannot point at private, loopback or link-local addresses (no SSRF into the LAPI, Docker or cloud metadata)
+- Errors only carry details for signed-in users
 - Every change is written to the audit log
+
+If you do put it on the internet, put it behind HTTPS with `TRUST_PROXY=true`, turn on **Require 2FA for everyone**, and keep the Docker socket in mind: anyone who becomes admin here can run the allowed `cscli` commands on your CrowdSec.
 
 ## Development
 

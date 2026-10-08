@@ -2,13 +2,15 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { streamSSE } from 'hono/streaming';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { bodyLimit } from 'hono/body-limit';
 import { readFileSync } from 'node:fs';
 import { config } from './config.js';
 import { db, audit, getSetting, setSetting } from './db.js';
 import {
-  checkPassword, checkTotp, clearFailures, createSession, destroySession, hashPassword, markTotpOk,
-  newTotpSecret, recordFailure, requireRole, sessionFor, tooManyFailures, userCount, type User,
+  burnPasswordCheck, checkPassword, checkTotp, clearFailures, clientIp, createSession, destroySession, endOtherSessions,
+  hashPassword, markTotpOk, newTotpSecret, recordFailure, require2faForAll, requireRole, sessionFor, tooManyFailures,
+  userCount, type User,
 } from './auth.js';
 import { addDecision, deleteDecision, deleteDecisionsFor, getAlert, getAlerts, lapiHealth } from './lapi.js';
 import { recentAlerts, slim, summarize } from './stats.js';
@@ -31,18 +33,49 @@ const viewer = requireRole('viewer');
 const operator = requireRole('operator');
 const admin = requireRole('admin');
 const who = (c: any) => (c.get('user') as User).username;
-const ip = (c: any) => c.req.header('x-forwarded-for')?.split(',')[0].trim() ?? 'local';
+const ip = (c: any) => clientIp(c);
+const enrolling = requireRole('viewer', { enrolling: true });
 
+// details only for signed-in users, a stranger gets nothing about the internals
 app.onError((err, c) => {
   console.error('[api]', c.req.method, c.req.path, err.message);
-  return c.json({ error: err.message }, 500);
+  return c.json({ error: sessionFor(c) ? err.message : 'internal error' }, 500);
 });
+
+const CSP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: https:",
+  "font-src 'self'", "connect-src 'self'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'",
+].join('; ');
 
 app.use('*', async (c, next) => {
   await next();
   c.header('X-Frame-Options', 'DENY');
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('Referrer-Policy', 'no-referrer');
+  c.header('Content-Security-Policy', CSP);
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  c.header('Cross-Origin-Opener-Policy', 'same-origin');
+  c.header('Cross-Origin-Resource-Policy', 'same-origin');
+  if (config.cookieSecure) c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (c.req.path.startsWith('/api/')) c.header('Cache-Control', 'no-store');
+});
+
+app.use('/api/*', bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: 'request too large' }, 413) }));
+app.use('/hooks/*', bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: 'request too large' }, 413) }));
+
+// csrf: a write must come from our own page. browsers will not send this header cross-site
+// without a cors preflight, and we answer none
+app.use('/api/*', async (c, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) return next();
+  if (c.req.header('x-argos') !== '1') return c.json({ error: 'missing request header' }, 403);
+  const origin = c.req.header('origin');
+  if (origin) {
+    let host = '';
+    try { host = new URL(origin).host; } catch { /* bad origin */ }
+    const self = c.req.header('x-forwarded-host') && config.trustProxy ? c.req.header('x-forwarded-host') : c.req.header('host');
+    if (host !== self) return c.json({ error: 'cross-site request refused' }, 403);
+  }
+  return next();
 });
 
 // ---------------------------------------------------------------- auth
@@ -55,6 +88,7 @@ app.get('/api/auth/me', (c) => {
     setup: userCount() === 0,
     user: s ? { username: s.user.username, role: s.user.role, totp: !!s.user.totp_secret } : null,
     needsTotp: !!s && !!s.user.totp_secret && !s.totpOk,
+    mustEnroll: !!s && !s.user.totp_secret && require2faForAll(),
     instance: config.instanceName,
     home: [config.homeLon, config.homeLat],
   });
@@ -62,8 +96,10 @@ app.get('/api/auth/me', (c) => {
 
 app.post('/api/auth/setup', async (c) => {
   if (userCount() > 0) return c.json({ error: 'already set up' }, 400);
+  if (tooManyFailures(ip(c))) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429);
   const { token, username, password } = await c.req.json();
-  if (token !== setupToken) return c.json({ error: 'wrong setup token' }, 403);
+  const a = Buffer.from(String(token ?? '')); const b = Buffer.from(setupToken);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) { recordFailure(ip(c)); return c.json({ error: 'wrong setup token' }, 403); }
   if (!/^[\w.-]{3,32}$/.test(username) || String(password).length < 10)
     return c.json({ error: 'username 3-32 chars, password 10+ chars' }, 400);
   const r = db.prepare('INSERT INTO users (username, pass_hash, role, created_at) VALUES (?, ?, ?, ?)')
@@ -74,15 +110,17 @@ app.post('/api/auth/setup', async (c) => {
 });
 
 app.post('/api/auth/login', async (c) => {
-  if (tooManyFailures(ip(c))) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429);
   const { username, password } = await c.req.json();
-  const u = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username)) as any;
-  if (!u || !checkPassword(String(password), u.pass_hash)) {
-    recordFailure(ip(c));
-    audit(String(username), 'login.failed', ip(c));
+  const name = String(username ?? '').slice(0, 64);
+  if (tooManyFailures(ip(c), name)) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429);
+  const u = db.prepare('SELECT * FROM users WHERE username = ?').get(name) as any;
+  const ok = u ? checkPassword(String(password ?? ''), u.pass_hash) : (burnPasswordCheck(String(password ?? '')), false);
+  if (!ok) {
+    recordFailure(ip(c), name);
+    audit(name, 'login.failed', ip(c));
     return c.json({ error: 'wrong username or password' }, 401);
   }
-  clearFailures(ip(c));
+  clearFailures(ip(c), name);
   createSession(c, u.id, !u.totp_secret);
   audit(u.username, 'login', ip(c));
   return c.json({ totp: !!u.totp_secret });
@@ -94,7 +132,8 @@ app.post('/api/auth/totp', async (c) => {
   if (tooManyFailures(ip(c))) return c.json({ error: 'too many attempts' }, 429);
   const { code } = await c.req.json();
   if (!checkTotp(s.user.totp_secret, String(code))) {
-    recordFailure(ip(c));
+    recordFailure(ip(c), s.user.username);
+    audit(s.user.username, '2fa.failed', ip(c));
     return c.json({ error: 'wrong code' }, 401);
   }
   markTotpOk(s.sid);
@@ -103,16 +142,19 @@ app.post('/api/auth/totp', async (c) => {
 
 app.post('/api/auth/logout', (c) => { destroySession(c); return c.json({ ok: true }); });
 
-app.post('/api/auth/totp/enroll', viewer, (c) => {
+app.post('/api/auth/totp/enroll', enrolling, (c) => {
   const secret = newTotpSecret();
   const u = c.get('user');
   return c.json({ secret, uri: `otpauth://totp/Argos:${encodeURIComponent(u.username)}?secret=${secret}&issuer=Argos` });
 });
 
-app.post('/api/auth/totp/confirm', viewer, async (c) => {
+app.post('/api/auth/totp/confirm', enrolling, async (c) => {
   const { secret, code } = await c.req.json();
-  if (!checkTotp(String(secret), String(code))) return c.json({ error: 'wrong code' }, 400);
+  if (!/^[A-Z2-7]{16,64}$/.test(String(secret)) || !checkTotp(String(secret), String(code))) return c.json({ error: 'wrong code' }, 400);
   db.prepare('UPDATE users SET totp_secret = ? WHERE id = ?').run(secret, c.get('user').id);
+  const s = sessionFor(c)!;
+  markTotpOk(s.sid);
+  endOtherSessions(s.user.id, s.sid);
   audit(who(c), '2fa.enabled');
   return c.json({ ok: true });
 });
@@ -122,16 +164,18 @@ app.post('/api/auth/totp/disable', viewer, async (c) => {
   const { code } = await c.req.json();
   if (!u.totp_secret || !checkTotp(u.totp_secret, String(code))) return c.json({ error: 'wrong code' }, 400);
   db.prepare('UPDATE users SET totp_secret = NULL WHERE id = ?').run(u.id);
+  endOtherSessions(u.id, sessionFor(c)?.sid);
   audit(who(c), '2fa.disabled');
   return c.json({ ok: true });
 });
 
-app.post('/api/auth/password', viewer, async (c) => {
+app.post('/api/auth/password', enrolling, async (c) => {
   const { current, next } = await c.req.json();
   const row = db.prepare('SELECT pass_hash FROM users WHERE id = ?').get(c.get('user').id) as any;
   if (!checkPassword(String(current), row.pass_hash)) return c.json({ error: 'current password is wrong' }, 400);
   if (String(next).length < 10) return c.json({ error: 'password must be 10+ chars' }, 400);
   db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(next), c.get('user').id);
+  endOtherSessions(c.get('user').id, sessionFor(c)?.sid);
   audit(who(c), 'password.changed');
   return c.json({ ok: true });
 });
@@ -533,10 +577,15 @@ app.get('/api/settings', admin, (c) => c.json({
   ctiKeySet: !!getSetting('cti.key', ''),
   abuseKeySet: !!getSetting('abuse.key', ''),
   repMode: getSetting<RepMode>('rep.mode', 'auto'),
+  require2fa: require2faForAll(),
 }));
 app.put('/api/settings', admin, async (c) => {
-  const { ctiKey, abuseKey, repMode } = await c.req.json();
+  const { ctiKey, abuseKey, repMode, require2fa } = await c.req.json();
   const changed: string[] = [];
+  if (typeof require2fa === 'boolean') {
+    if (require2fa && !c.get('user').totp_secret) return c.json({ error: 'turn on 2FA for your own account first' }, 400);
+    setSetting('auth.require2fa', require2fa); changed.push(`require2fa=${require2fa}`);
+  }
   if (typeof ctiKey === 'string' && ctiKey.trim()) { setSetting('cti.key', ctiKey.trim()); changed.push('cti.key'); }
   if (typeof abuseKey === 'string' && abuseKey.trim()) { setSetting('abuse.key', abuseKey.trim()); changed.push('abuse.key'); }
   if (['auto', 'cti', 'abuseipdb'].includes(repMode)) { setSetting('rep.mode', repMode); changed.push(`rep.mode=${repMode}`); }
@@ -558,14 +607,19 @@ app.post('/api/users', admin, async (c) => {
 app.patch('/api/users/:id', admin, async (c) => {
   const { role, resetTotp } = await c.req.json();
   const id = Number(c.req.param('id'));
+  const admins = (db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'admin'").get() as { n: number }).n;
+  const target = db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string } | undefined;
+  if (!target) return c.json({ error: 'no such user' }, 404);
+  if (role && role !== 'admin' && target.role === 'admin' && admins <= 1) return c.json({ error: 'cannot demote the last admin' }, 400);
   if (role && ['admin', 'operator', 'viewer'].includes(role)) db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
-  if (resetTotp) db.prepare('UPDATE users SET totp_secret = NULL WHERE id = ?').run(id);
+  if (resetTotp) { db.prepare('UPDATE users SET totp_secret = NULL WHERE id = ?').run(id); endOtherSessions(id); }
   audit(who(c), 'user.update', String(id), { role, resetTotp });
   return c.json({ ok: true });
 });
 app.delete('/api/users/:id', admin, (c) => {
   const id = Number(c.req.param('id'));
   if (id === c.get('user').id) return c.json({ error: 'cannot delete yourself' }, 400);
+  endOtherSessions(id);
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
   audit(who(c), 'user.delete', String(id));
   return c.json({ ok: true });

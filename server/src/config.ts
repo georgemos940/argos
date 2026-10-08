@@ -28,6 +28,8 @@ export const config = {
   // never banned by blocklists
   selfIps: env('SELF_IPS', '').split(/[\s,]+/).filter(Boolean),
   instanceName: env('INSTANCE_NAME', 'crowdsec'),
+  // behind a reverse proxy: take the client ip from X-Real-IP / X-Forwarded-For, never otherwise
+  trustProxy: env('TRUST_PROXY', 'false') === 'true',
   // false only for plain http
   cookieSecure: env('COOKIE_SECURE', 'true') !== 'false',
 };

@@ -236,7 +236,7 @@ export default function App() {
   }, [load]);
 
   if (!me) return <div className="grid h-full place-items-center text-slate-500">Loading…</div>;
-  if (!me.user || me.needsTotp || me.setup) return <><Login me={me} onDone={load} /><Toasts /><AskHost /></>;
+  if (!me.user || me.needsTotp || me.setup || me.mustEnroll) return <><Login me={me} onDone={load} /><Toasts /><AskHost /></>;
 
   const role = me.user.role;
   const logout = async () => { await api('/auth/logout', { method: 'POST' }); load(); };

@@ -7,7 +7,7 @@ export async function api<T = any>(path: string, init: RequestInit & { json?: un
   const res = await fetch(`/api${path}`, {
     credentials: 'same-origin',
     ...rest,
-    headers: { ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(rest.headers ?? {}) },
+    headers: { 'X-Argos': '1', ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(rest.headers ?? {}) },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   });
   const text = await res.text();
@@ -23,6 +23,7 @@ export interface Me {
   setup: boolean;
   user: { username: string; role: 'admin' | 'operator' | 'viewer'; totp: boolean } | null;
   needsTotp: boolean;
+  mustEnroll?: boolean;
   instance: string;
   home?: [number, number];
 }
