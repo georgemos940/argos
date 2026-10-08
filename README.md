@@ -65,7 +65,7 @@ Open `http://localhost:3000`.
 
 ```sh
 cd examples/all-in-one
-cp .env.example .env        # three secrets: openssl rand -hex 32
+cp .env.example .env        # four secrets: openssl rand -hex 32
 docker compose up -d
 docker compose logs argos | grep 'Setup token'
 ```
@@ -89,7 +89,7 @@ echo "$PW"
 
 ```sh
 cp .env.example .env
-# set LAPI_PASSWORD to the password above and SESSION_SECRET to: openssl rand -hex 32
+# set LAPI_PASSWORD to the password above; SESSION_SECRET and DOCKER_PROXY_TOKEN to: openssl rand -hex 32
 ```
 
 **3. Run**
@@ -113,7 +113,8 @@ Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
 | `LAPI_AUTO_REGISTER` | `false` | `true` creates that machine through `cscli` when the login is refused (password 16+ chars) |
 | `DEMO` | | `1` runs on generated data, read-only, no CrowdSec needed |
 | `CROWDSEC_CONTAINER` | `crowdsec` | container name for `cscli` and restarts |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | |
+| `DOCKER_PROXY_URL` / `DOCKER_PROXY_TOKEN` | | how Argos reaches Docker through `argos-docker-proxy` (set in `docker-compose.yml`) |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | only without the proxy |
 | `DATA_DIR` | `./data` | SQLite database (users, settings, audit) |
 | `INSTANCE_NAME` | `crowdsec` | shown in the sidebar, used for Console enrollment |
 | `HOME_LAT` / `HOME_LON` | Frankfurt | your server on the attack map |
@@ -132,9 +133,12 @@ Grafana's Discord integration only fills the embed title. Point a **webhook** co
 
 ## Security
 
-- The panel mounts the Docker socket. That is root on the host, so:
-  - only an allow-list of `cscli` commands can run (`server/src/cscli.ts`); the explain tool passes the log line as a single argument, never through a shell
-  - do not expose it to the internet. Bind it to localhost or a VPN address and put it behind a reverse proxy with an IP allow-list or SSO
+- **Argos never holds the Docker socket.** A second container from the same image, `argos-docker-proxy`, does, and it only lets through:
+  - an exec in the CrowdSec container whose argv passes the `cscli` allow-list (`server/src/argv.ts`), checked again there, never a shell
+  - reading back the execs it created, and a restart of the CrowdSec container
+
+  Everything else (other containers, `create`, `json`, images, volumes) gets a 403, and the proxy sits on an internal-only network with a token. If Argos itself were compromised, the worst it can do is run the allowed `cscli` commands.
+- Keep it off the open internet when you can: bind to localhost or a VPN address, or put an IP allow-list or SSO in front
 - Passwords are hashed with scrypt; sessions are `__Host-` HTTP-only, `SameSite=Strict` cookies that end on password or 2FA changes
 - Optional **Require 2FA for everyone** (Settings → Users): accounts without TOTP must enrol before they see anything. TOTP codes cannot be replayed
 - Failed logins are limited per IP and per username; unknown usernames take as long as wrong passwords
@@ -144,7 +148,7 @@ Grafana's Discord integration only fills the embed title. Point a **webhook** co
 - Errors only carry details for signed-in users
 - Every change is written to the audit log
 
-If you do put it on the internet, put it behind HTTPS with `TRUST_PROXY=true`, turn on **Require 2FA for everyone**, and keep the Docker socket in mind: anyone who becomes admin here can run the allowed `cscli` commands on your CrowdSec.
+If you do put it on the internet, put it behind HTTPS with `TRUST_PROXY=true`, turn on **Require 2FA for everyone**, and remember that an admin in Argos can run the allowed `cscli` commands on your CrowdSec.
 
 ## Development
 

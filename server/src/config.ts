@@ -18,6 +18,9 @@ export const config = {
   promUrl: env('PROM_URL', 'http://prometheus:9090'),
   crowdsecContainer: env('CROWDSEC_CONTAINER', 'crowdsec'),
   dockerSocket: env('DOCKER_SOCKET', '/var/run/docker.sock'),
+  // optional: reach docker through the argos docker proxy instead of holding the socket
+  dockerProxyUrl: env('DOCKER_PROXY_URL', ''),
+  dockerProxyToken: env('DOCKER_PROXY_TOKEN', ''),
   // cloudflare: env, or a bash file with CF_API_TOKEN="..." CF_ZONE_IDS=( "id" ... )
   cfToken: env('CF_API_TOKEN', ''),
   cfZones: env('CF_ZONE_IDS', '').split(/[\s,]+/).filter(Boolean),

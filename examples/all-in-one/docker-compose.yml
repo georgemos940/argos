@@ -73,16 +73,40 @@ services:
       # creates the argos machine in crowdsec on first start
       LAPI_AUTO_REGISTER: "true"
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
-      CROWDSEC_CONTAINER: crowdsec
+      DOCKER_PROXY_URL: http://argos-docker-proxy:2375
+      DOCKER_PROXY_TOKEN: ${DOCKER_PROXY_TOKEN:?set DOCKER_PROXY_TOKEN in .env}
       DATA_DIR: /data
       # plain http on localhost; set true once it sits behind https
       COOKIE_SECURE: "false"
     volumes:
       - argos-data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [default, argos-internal]
     depends_on:
       crowdsec:
         condition: service_healthy
+      argos-docker-proxy:
+        condition: service_started
+
+  # the only container with the docker socket: allowed cscli in crowdsec and a restart, nothing else
+  argos-docker-proxy:
+    image: ghcr.io/georgemos940/crowdsec-argos-ui:latest
+    container_name: argos-docker-proxy
+    restart: unless-stopped
+    command: ["node", "dist/server/docker-proxy.js"]
+    environment:
+      PROXY_TOKEN: ${DOCKER_PROXY_TOKEN}
+      CROWDSEC_CONTAINER: crowdsec
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [argos-internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2375/_health').then(() => process.exit(0), () => process.exit(1))"]
+      interval: 30s
+
+networks:
+  default:
+  argos-internal:
+    internal: true
 
 volumes:
   crowdsec-db:

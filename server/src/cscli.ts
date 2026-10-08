@@ -1,41 +1,14 @@
-import { request } from 'node:http';
 import { config } from './config.js';
+import { isAllowed } from './argv.js';
+import { dockerRequest, type DockerTarget } from './docker.js';
 
-function docker(method: string, path: string, body?: unknown): Promise<{ status: number; data: Buffer }> {
-  return new Promise((resolve, reject) => {
-    const req = request(
-      { socketPath: config.dockerSocket, method, path, headers: { 'Content-Type': 'application/json' } },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (d) => chunks.push(d));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, data: Buffer.concat(chunks) }));
-      },
-    );
-    req.on('error', reject);
-    req.setTimeout(60_000, () => req.destroy(new Error('docker timeout')));
-    if (body !== undefined) req.write(JSON.stringify(body));
-    req.end();
-  });
-}
+export { isAllowed } from './argv.js';
 
-// the docker socket is root, so only these commands go through
-// hub items are author/name, nothing that looks like a path
-const ITEM = String.raw`[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w-]*(?:\.[\w-]+)*`;
-
-const ALLOWED: RegExp[] = [
-  /^(bouncers|machines) list$/,
-  /^(hub) (list|update|upgrade)( --dry-run| -a)?$/,
-  new RegExp(`^simulation (status|enable|disable)( ${ITEM}| --global)?$`),
-  /^console (status|enable|disable)( [\w-]+)?$/,
-  /^console enroll [\w-]{10,64} --name [\w.-]{1,64}$/,
-  /^metrics show appsec$/,
-  new RegExp(`^(scenarios|collections|parsers|postoverflows|contexts|appsec-rules|appsec-configs) (list|inspect|install|remove)( ${ITEM})?$`),
-  /^allowlists (list|inspect|create|add|remove|delete)( [\w.:/-]+)*( --(description|expiration|comment) .+)?$/,
-  /^metrics( show [\w,-]+)?$/,
-  /^decisions list$/,
-];
-
-export const isAllowed = (line: string) => ALLOWED.some((re) => re.test(line));
+// straight on the socket, or through the argos docker proxy when DOCKER_PROXY_URL is set
+const target: DockerTarget = config.dockerProxyUrl
+  ? { url: config.dockerProxyUrl, token: config.dockerProxyToken }
+  : { socketPath: config.dockerSocket };
+const docker = (method: string, path: string, body?: unknown) => dockerRequest(target, method, path, body);
 
 export async function restartCrowdsec(): Promise<void> {
   const r = await docker('POST', `/containers/${config.crowdsecContainer}/restart?t=20`);

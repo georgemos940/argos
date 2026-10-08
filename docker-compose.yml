@@ -9,12 +9,33 @@ services:
       # keep it off the public internet: bind to localhost or a vpn address and put a reverse proxy in front
       - "127.0.0.1:3010:3000"
     env_file: .env
+    environment:
+      # no docker socket here: cscli, hub installs and restarts go through the proxy below
+      DOCKER_PROXY_URL: http://argos-docker-proxy:2375
     volumes:
       - data:/data
-      # cscli, hub installs and crowdsec restarts run through the docker socket (see README, security)
-      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - crowdsec
+      - argos-internal
+    depends_on: [argos-docker-proxy]
+
+  # the only container with the socket. it lets through an allowed cscli exec in the crowdsec
+  # container and a restart of it, nothing else (see README, security)
+  argos-docker-proxy:
+    image: ghcr.io/georgemos940/crowdsec-argos-ui:latest
+    container_name: argos-docker-proxy
+    restart: unless-stopped
+    command: ["node", "dist/server/docker-proxy.js"]
+    environment:
+      PROXY_TOKEN: ${DOCKER_PROXY_TOKEN:?set DOCKER_PROXY_TOKEN in .env}
+      CROWDSEC_CONTAINER: ${CROWDSEC_CONTAINER:-crowdsec}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - argos-internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2375/_health').then(() => process.exit(0), () => process.exit(1))"]
+      interval: 30s
 
 volumes:
   data:
@@ -24,3 +45,6 @@ networks:
     external: true
     # the network your crowdsec container is on
     name: ${CROWDSEC_NETWORK:-crowdsec}
+  # argos <-> proxy only, no way out
+  argos-internal:
+    internal: true
