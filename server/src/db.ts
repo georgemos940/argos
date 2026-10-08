@@ -32,6 +32,16 @@ db.exec(`
     target TEXT,
     detail TEXT
   );
+  CREATE TABLE IF NOT EXISTS passkeys (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    alg INTEGER NOT NULL,
+    counter INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
   CREATE TABLE IF NOT EXISTS tokens (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -49,6 +59,11 @@ db.exec(`
     value TEXT NOT NULL
   );
 `);
+
+// columns added after the first release
+const hasColumn = (table: string, col: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((r) => r.name === col);
+if (!hasColumn('sessions', 'method')) db.exec("ALTER TABLE sessions ADD COLUMN method TEXT NOT NULL DEFAULT 'password'");
+db.exec('PRAGMA foreign_keys = ON');
 
 export function getSetting<T>(key: string, fallback: T): T {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;

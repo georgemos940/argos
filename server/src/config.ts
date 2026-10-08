@@ -39,6 +39,8 @@ export const config = {
   trustProxy: env('TRUST_PROXY', 'false') === 'true',
   // create the lapi machine through cscli when the login is refused (fresh installs)
   lapiAutoRegister: env('LAPI_AUTO_REGISTER', 'false') === 'true',
+  // https://argos.example.com, what passkeys and sso are bound to. derived from the request when empty
+  publicUrl: env('PUBLIC_URL', '').replace(/\/+$/, ''),
   // false only for plain http
   cookieSecure: env('COOKIE_SECURE', 'true') !== 'false',
 };

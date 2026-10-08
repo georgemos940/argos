@@ -10,7 +10,7 @@ import { db, audit, getSetting, setSetting } from './db.js';
 import {
   burnPasswordCheck, checkPassword, checkTotp, clearFailures, clientIp, createSession, destroySession, endOtherSessions,
   hashPassword, markTotpOk, newTotpSecret, recordFailure, require2faForAll, requireRole, sessionFor, tooManyFailures,
-  userCount, createToken, hasBearer, TOKEN_ROLES, type Role, type User,
+  userCount, createToken, hasBearer, mustEnroll, TOKEN_ROLES, type Role, type User,
 } from './auth.js';
 import { addDecision, deleteDecision, deleteDecisionsFor, getAlert, getAlerts, lapiHealth } from './lapi.js';
 import { recentAlerts, slim, summarize } from './stats.js';
@@ -33,6 +33,8 @@ import {
 import { reputation, type RepMode } from './reputation.js';
 import { mountDemo } from './demo.js';
 import { findSuspects } from './falsepos.js';
+import { verifyAssertion, verifyRegistration } from './webauthn.js';
+import { challengeOf, hasPasskey, newChallenge, passkeyById, passkeysOf, publicOrigin, rpId, takeChallenge } from './passkeys.js';
 import {
   digestMessage, digestSettings, publicChannels, removeChannel, saveChannel, send as sendToChannel, sendDigest, startDigest,
   listChannels, type DigestSettings,
@@ -103,7 +105,8 @@ app.get('/api/auth/me', (c) => {
     setup: userCount() === 0,
     user: s ? { username: s.user.username, role: s.user.role, totp: !!s.user.totp_secret } : null,
     needsTotp: !!s && !!s.user.totp_secret && !s.totpOk,
-    mustEnroll: !!s && !s.user.totp_secret && require2faForAll(),
+    mustEnroll: !!s && mustEnroll(s),
+    passkeys: !!s && hasPasskey(s.user.id),
     instance: config.instanceName,
     home: [config.homeLon, config.homeLat],
   });
@@ -192,6 +195,73 @@ app.post('/api/auth/password', enrolling, async (c) => {
   db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(next), c.get('user').id);
   endOtherSessions(c.get('user').id, sessionFor(c)?.sid);
   audit(who(c), 'password.changed');
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------- passkeys
+const expect = (c: any, challenge: string) => ({ challenge, origin: publicOrigin(c), rpId: rpId(c) });
+
+app.get('/api/auth/passkeys', enrolling, (c) => c.json(passkeysOf(c.get('user').id)));
+
+app.post('/api/auth/passkey/register/options', enrolling, (c) => {
+  const u = c.get('user');
+  return c.json({
+    challenge: newChallenge('register', u.id),
+    rp: { name: 'Argos', id: rpId(c) },
+    user: { id: Buffer.from(`argos:${u.id}`).toString('base64url'), name: u.username, displayName: u.username },
+    pubKeyCredParams: [-7, -8, -257].map((alg) => ({ type: 'public-key', alg })),
+    authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
+    excludeCredentials: passkeysOf(u.id).map((p) => ({ type: 'public-key', id: p.id })),
+    attestation: 'none',
+    timeout: 120_000,
+  });
+});
+
+app.post('/api/auth/passkey/register', enrolling, async (c) => {
+  const u = c.get('user');
+  const { name, response } = await c.req.json();
+  const challenge = challengeOf(response?.clientDataJSON);
+  if (!takeChallenge(challenge, 'register', u.id)) return c.json({ error: 'this passkey request expired, try again' }, 400);
+  const cred = verifyRegistration(response ?? {}, expect(c, challenge));
+  if (passkeyById(cred.id)) return c.json({ error: 'this passkey is already registered' }, 400);
+  const label = String(name ?? '').trim().slice(0, 40) || 'Passkey';
+  db.prepare('INSERT INTO passkeys (id, user_id, name, public_key, alg, counter, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(cred.id, u.id, label, cred.publicKey, cred.alg, cred.counter, Date.now());
+  // making one took the device and a pin or fingerprint, that is a second factor for this session
+  const s = sessionFor(c)!;
+  markTotpOk(s.sid, s.method === 'password' && !u.totp_secret ? 'passkey' : undefined);
+  audit(u.username, 'passkey.add', label);
+  return c.json({ ok: true });
+});
+
+app.delete('/api/auth/passkeys/:id', viewer, (c) => {
+  const u = c.get('user');
+  const r = db.prepare('DELETE FROM passkeys WHERE id = ? AND user_id = ?').run(c.req.param('id'), u.id);
+  if (!r.changes) return c.json({ error: 'no such passkey' }, 404);
+  audit(u.username, 'passkey.remove', c.req.param('id').slice(0, 12));
+  return c.json({ ok: true });
+});
+
+app.post('/api/auth/passkey/login/options', (c) => {
+  if (tooManyFailures(ip(c))) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429);
+  return c.json({ challenge: newChallenge('login'), rpId: rpId(c), userVerification: 'required', allowCredentials: [], timeout: 120_000 });
+});
+
+app.post('/api/auth/passkey/login', async (c) => {
+  if (tooManyFailures(ip(c))) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429);
+  const { response, id } = await c.req.json();
+  const challenge = challengeOf(response?.clientDataJSON);
+  const fail = (why: string) => { recordFailure(ip(c)); audit(null, 'login.failed', ip(c), { passkey: why }); return c.json({ error: why }, 401); };
+  if (!takeChallenge(challenge, 'login')) return fail('this sign-in request expired, try again');
+  const cred = typeof id === 'string' ? passkeyById(id) : undefined;
+  if (!cred) return fail('this passkey is not registered here');
+  let counter: number;
+  try { ({ counter } = verifyAssertion(response ?? {}, { publicKey: cred.public_key, alg: cred.alg, counter: cred.counter }, expect(c, challenge))); } catch (e: any) { return fail(e.message); }
+  db.prepare('UPDATE passkeys SET counter = ?, last_used_at = ? WHERE id = ?').run(counter, Date.now(), cred.id);
+  const u = db.prepare('SELECT username FROM users WHERE id = ?').get(cred.user_id) as { username: string };
+  clearFailures(ip(c), u.username);
+  createSession(c, cred.user_id, true, 'passkey');
+  audit(u.username, 'login', ip(c), { method: 'passkey' });
   return c.json({ ok: true });
 });
 
@@ -730,7 +800,7 @@ app.put('/api/settings', admin, async (c) => {
   const { ctiKey, abuseKey, repMode, require2fa } = await c.req.json();
   const changed: string[] = [];
   if (typeof require2fa === 'boolean') {
-    if (require2fa && !c.get('user').totp_secret) return c.json({ error: 'turn on 2FA for your own account first' }, 400);
+    if (require2fa && !c.get('user').totp_secret && !hasPasskey(c.get('user').id)) return c.json({ error: 'turn on 2FA or add a passkey for your own account first' }, 400);
     setSetting('auth.require2fa', require2fa); changed.push(`require2fa=${require2fa}`);
   }
   if (typeof ctiKey === 'string' && ctiKey.trim()) { setSetting('cti.key', ctiKey.trim()); changed.push('cti.key'); }
@@ -741,7 +811,7 @@ app.put('/api/settings', admin, async (c) => {
 });
 
 app.get('/api/users', admin, (c) =>
-  c.json(db.prepare('SELECT id, username, role, totp_secret IS NOT NULL AS totp, created_at FROM users ORDER BY id').all()));
+  c.json(db.prepare('SELECT id, username, role, totp_secret IS NOT NULL AS totp, (SELECT COUNT(*) FROM passkeys p WHERE p.user_id = users.id) AS passkeys, created_at FROM users ORDER BY id').all()));
 app.post('/api/users', admin, async (c) => {
   const { username, password, role } = await c.req.json();
   if (!/^[\w.-]{3,32}$/.test(username) || String(password).length < 10 || !['admin', 'operator', 'viewer'].includes(role))

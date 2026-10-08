@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { KeyRound, ShieldCheck } from 'lucide-react';
+import { Fingerprint, KeyRound, ShieldCheck } from 'lucide-react';
 import { api, type Me } from '../api';
 import { Button, ErrorBox, Field, inputCls } from '../ui';
+import { addPasskey, deviceName, passkeysSupported, signInWithPasskey } from '../passkey';
 
 export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
   const [username, setUsername] = useState('');
@@ -36,6 +37,22 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
       setBusy(false);
     }
   };
+
+  const passkey = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      // enrolling: a passkey counts as the second factor too
+      if (mode === 'enroll') await addPasskey(deviceName());
+      else await signInWithPasskey();
+      onDone();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const showPasskey = passkeysSupported() && mode !== 'setup';
 
   return (
     <div className="grid min-h-full place-items-center p-6">
@@ -85,6 +102,14 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
             {mode === 'setup' ? 'Create admin' : mode === 'totp' ? 'Verify' : mode === 'enroll' ? 'Turn on 2FA' : 'Sign in'}
           </Button>
         </form>
+        {showPasskey && (
+          <div className="mt-4 space-y-4">
+            <div className="flex items-center gap-3 text-[11px] tracking-[0.2em] text-slate-600 uppercase"><span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" /></div>
+            <Button className="w-full" disabled={busy} onClick={passkey}>
+              <Fingerprint size={16} /> {mode === 'enroll' ? 'Add a passkey instead' : mode === 'totp' ? 'Use a passkey instead' : 'Sign in with a passkey'}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

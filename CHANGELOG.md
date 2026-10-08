@@ -12,6 +12,7 @@ Versions follow [semver](https://semver.org). Docker images are tagged with the 
 - Bouncer usage: dropped packets and bytes per bouncer and decision source
 - Installable as an app (PWA), opens offline to the last shell
 - False positives page: bans that look like real visitors or the app itself, with the reasons and allow / unban / ignore rule in one click
+- Passkeys (WebAuthn): add them in Settings, sign in without a password; they satisfy Require 2FA. `PUBLIC_URL` pins the origin they are bound to
 - API tokens (viewer or operator, with expiry) for scripts: `Authorization: Bearer argos_…`
 
 ## 1.0.0

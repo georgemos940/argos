@@ -30,6 +30,7 @@
 - **Ignore rules**: requests that never count toward a ban (health checks, your app's API, a monitor), by path, host, user agent, method or status
 - **Bouncer usage**: what each bouncer dropped, per decision source
 - **API tokens** for scripts, and installable as an app (PWA)
+- **Passkeys**: sign in with a fingerprint, face or device PIN; a passkey also counts as the second factor when 2FA is required
 - **Web firewall**: CrowdSec AppSec metrics, blocked requests and the rules that fired
 - **Hub store**: browse and install collections, scenarios, parsers and AppSec rules; upgrade everything with a dry-run preview; CrowdSec restarts on its own
 - **Simulation mode** per scenario, to try a rule without banning anyone
@@ -128,6 +129,7 @@ Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
 | `PROM_URL` | `http://prometheus:9090` | optional, charts |
 | `CF_API_TOKEN` / `CF_ZONE_IDS` | | optional, Cloudflare Under Attack switch. Token needs Zone Settings edit |
 | `ZONE_RPS_QUERY` | | optional, Prometheus query with a `zone` label for the Cloudflare chart |
+| `PUBLIC_URL` | | `https://argos.example.com`, the address people open. Passkeys and SSO are bound to it; without it Argos takes it from the request |
 | `COOKIE_SECURE` | `true` | set `false` only when serving over plain http |
 | `TRUST_PROXY` | `false` | `true` behind a reverse proxy, so login rate limits and the audit log see the real client IP from `X-Real-IP` / `X-Forwarded-For`. Leave `false` when the panel is reached directly, or anyone can fake their address |
 

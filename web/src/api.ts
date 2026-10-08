@@ -24,6 +24,7 @@ export interface Me {
   user: { username: string; role: 'admin' | 'operator' | 'viewer'; totp: boolean } | null;
   needsTotp: boolean;
   mustEnroll?: boolean;
+  passkeys?: boolean;
   instance: string;
   home?: [number, number];
   demo?: boolean;

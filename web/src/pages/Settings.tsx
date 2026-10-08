@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Check, Copy, KeyRound, KeySquare, Plus, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { Check, Copy, Fingerprint, KeyRound, KeySquare, Plus, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { addPasskey, deviceName, passkeysSupported } from '../passkey';
 import { api, type Me } from '../api';
 import { can } from '../App';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Modal, SkeletonList, Switch, ago, ask, inputCls, toast, useAsync } from '../ui';
@@ -17,6 +18,7 @@ export default function Settings({ me, reload }: { me: Me; reload: () => void })
       <div className="grid gap-6 xl:grid-cols-2">
         <Password />
         <TwoFactor enabled={me.user!.totp} reload={reload} />
+        <Passkeys reload={reload} />
         {admin && <UsersCard me={me.user!.username} />}
         {admin && <Tokens />}
         {admin && <Integrations />}
@@ -92,8 +94,44 @@ function TwoFactor({ enabled, reload }: { enabled: boolean; reload: () => void }
   );
 }
 
+function Passkeys({ reload: reloadMe }: { reload: () => void }) {
+  const { data, reload } = useAsync(() => api<{ id: string; name: string; created_at: number; last_used_at: number | null }[]>('/auth/passkeys'), []);
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    setBusy(true);
+    try { await addPasskey(deviceName()); toast('Passkey added'); reload(); reloadMe(); }
+    catch (e: any) { toast(e.message, 'err'); }
+    finally { setBusy(false); }
+  };
+  const remove = async (p: { id: string; name: string }) => {
+    if (!await ask({ title: `Remove ${p.name}?`, body: 'You can no longer sign in with it. Remove it from the device too.', tone: 'danger', confirmLabel: 'Remove' })) return;
+    await api(`/auth/passkeys/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+    toast('Passkey removed');
+    reload();
+  };
+  return (
+    <Card title="Passkeys" icon={<Fingerprint size={16} />} actions={passkeysSupported() && <Button disabled={busy} onClick={add}><Plus size={14} /> Add</Button>}>
+      <p className="mb-3 text-sm text-slate-400">Sign in with your fingerprint, face or device PIN instead of a password and code. Phishing can't steal one.</p>
+      {!passkeysSupported() && <p className="text-xs text-amber-300">This browser does not support passkeys.</p>}
+      {!data && <SkeletonList rows={1} />}
+      {data && !data.length && <Empty>No passkeys yet</Empty>}
+      <ul className="divide-y divide-white/5">
+        {(data ?? []).map((p) => (
+          <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
+            <div>
+              <div className="text-sm text-white">{p.name}</div>
+              <div className="text-xs text-slate-500">added {ago(p.created_at)} · {p.last_used_at ? `used ${ago(p.last_used_at)}` : 'not used yet'}</div>
+            </div>
+            <Button tone="ghost" onClick={() => remove(p)}><Trash2 size={14} /></Button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 function UsersCard({ me }: { me: string }) {
-  const { data, reload } = useAsync(() => api<{ id: number; username: string; role: string; totp: number; created_at: number }[]>('/users'), []);
+  const { data, reload } = useAsync(() => api<{ id: number; username: string; role: string; totp: number; passkeys: number; created_at: number }[]>('/users'), []);
   const sec = useAsync(() => api<{ require2fa: boolean }>('/settings'), []);
   const setRequire2fa = async (v: boolean) => {
     try { await api('/settings', { method: 'PUT', json: { require2fa: v } }); toast(v ? '2FA is now required for everyone' : '2FA is optional again'); sec.reload(); }
@@ -122,7 +160,8 @@ function UsersCard({ me }: { me: string }) {
         {(data ?? []).map((u) => (
           <li key={u.id} className="flex items-center justify-between gap-3 py-2.5">
             <div>
-              <div className="flex items-center gap-2 text-sm text-white">{u.username}{u.totp ? <ShieldCheck size={13} className="text-emerald-400" /> : null}</div>
+              <div className="flex items-center gap-2 text-sm text-white">{u.username}{u.totp ? <ShieldCheck size={13} className="text-emerald-400" /> : null}
+                {u.passkeys ? <span title={`${u.passkeys} passkey${u.passkeys > 1 ? 's' : ''}`}><Fingerprint size={13} className="text-cyan-300" /></span> : null}</div>
               <div className="text-xs text-slate-500">added {ago(u.created_at)}</div>
             </div>
             <div className="flex items-center gap-2">

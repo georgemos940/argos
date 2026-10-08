@@ -74,11 +74,13 @@ export function checkTotp(secret: string, code: string): boolean {
   return true;
 }
 
-export function createSession(c: Context, userId: number, totpOk: boolean): void {
+// method: password, passkey or sso. a passkey or sso sign-in is already two factors
+export type SignIn = 'password' | 'passkey' | 'sso';
+export function createSession(c: Context, userId: number, totpOk: boolean, method: SignIn = 'password'): void {
   const id = randomBytes(32).toString('hex');
   const now = Date.now();
-  db.prepare('INSERT INTO sessions (id, user_id, totp_ok, ip, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, userId, totpOk ? 1 : 0, clientIp(c), now, now + SESSION_TTL);
+  db.prepare('INSERT INTO sessions (id, user_id, totp_ok, ip, created_at, expires_at, method) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, userId, totpOk ? 1 : 0, clientIp(c), now, now + SESSION_TTL, method);
   setCookie(c, COOKIE, id, { httpOnly: true, secure: config.cookieSecure, sameSite: 'Strict', path: '/', maxAge: SESSION_TTL / 1000 });
 }
 
@@ -88,11 +90,11 @@ export function destroySession(c: Context): void {
   deleteCookie(c, COOKIE, { path: '/' });
 }
 
-export function sessionFor(c: Context): { sid: string; user: User; totpOk: boolean } | null {
+export function sessionFor(c: Context): { sid: string; user: User; totpOk: boolean; method: SignIn } | null {
   const id = getCookie(c, COOKIE);
   if (!id) return null;
   const row = db.prepare(
-    `SELECT s.id sid, s.totp_ok, s.expires_at, u.id, u.username, u.role, u.totp_secret
+    `SELECT s.id sid, s.totp_ok, s.expires_at, s.method, u.id, u.username, u.role, u.totp_secret
        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`,
   ).get(id) as any;
   if (!row || row.expires_at < Date.now()) return null;
@@ -100,8 +102,12 @@ export function sessionFor(c: Context): { sid: string; user: User; totpOk: boole
     sid: row.sid,
     user: { id: row.id, username: row.username, role: row.role, totp_secret: row.totp_secret },
     totpOk: !!row.totp_ok,
+    method: row.method,
   };
 }
+
+// when 2fa is required: a password-only session of an account without totp has to enrol first
+export const mustEnroll = (s: { user: User; method: SignIn }) => !s.user.totp_secret && s.method === 'password' && require2faForAll();
 
 // after a password or 2fa change every other session of that user goes
 export function endOtherSessions(userId: number, keepSid?: string): void {
@@ -110,8 +116,8 @@ export function endOtherSessions(userId: number, keepSid?: string): void {
 
 export const require2faForAll = () => getSetting<boolean>('auth.require2fa', false);
 
-export function markTotpOk(sid: string): void {
-  db.prepare('UPDATE sessions SET totp_ok = 1 WHERE id = ?').run(sid);
+export function markTotpOk(sid: string, method?: SignIn): void {
+  db.prepare('UPDATE sessions SET totp_ok = 1, method = coalesce(?, method) WHERE id = ?').run(method ?? null, sid);
 }
 
 const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
@@ -156,7 +162,7 @@ export const requireRole = (min: Role, opts: { enrolling?: boolean } = {}): Midd
   const s = sessionFor(c);
   if (!s) return c.json({ error: 'not signed in' }, 401);
   if (s.user.totp_secret && !s.totpOk) return c.json({ error: '2fa required' }, 401);
-  if (!s.user.totp_secret && !opts.enrolling && require2faForAll()) return c.json({ error: 'set up 2fa first' }, 403);
+  if (!opts.enrolling && mustEnroll(s)) return c.json({ error: 'set up 2fa first' }, 403);
   if (RANK[s.user.role] < RANK[min]) return c.json({ error: 'forbidden' }, 403);
   c.set('user', s.user);
   await next();
