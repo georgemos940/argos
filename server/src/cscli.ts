@@ -1,6 +1,6 @@
 import { config } from './config.js';
-import { isAllowed } from './argv.js';
-import { dockerRequest, type DockerTarget } from './docker.js';
+import { CONFIG_TEST, isAllowed } from './argv.js';
+import { dockerRequest, readContainerFile, writeContainerFile, type DockerTarget, type FileKind } from './docker.js';
 
 export { isAllowed } from './argv.js';
 
@@ -14,6 +14,28 @@ export async function restartCrowdsec(): Promise<void> {
   const r = await docker('POST', `/containers/${config.crowdsecContainer}/restart?t=20`);
   if (r.status !== 204) throw new Error(`docker restart ${r.status}: ${r.data}`);
 }
+
+const why = (r: { status: number; data: Buffer }) => {
+  try { return JSON.parse(r.data.toString()).message ?? r.status; } catch { return r.status; }
+};
+
+// argos' own files in the crowdsec config: profiles.yaml and its whitelist parser
+export async function readCrowdsecFile(kind: FileKind): Promise<string | null> {
+  if ('socketPath' in target) return readContainerFile(target, config.crowdsecContainer, kind);
+  const r = await docker('GET', `/argos/files/${kind}`);
+  if (r.status === 404) return null;
+  if (r.status !== 200) throw new Error(`read ${kind}: ${why(r)}`);
+  return JSON.parse(r.data.toString()).content;
+}
+
+export async function writeCrowdsecFile(kind: FileKind, content: string): Promise<void> {
+  if ('socketPath' in target) return writeContainerFile(target, config.crowdsecContainer, kind, content);
+  const r = await docker('PUT', `/argos/files/${kind}`, { content });
+  if (r.status !== 200) throw new Error(`write ${kind}: ${why(r)}`);
+}
+
+// crowdsec -t, throws with crowdsec's own complaint
+export const testConfig = () => exec(CONFIG_TEST, false);
 
 export interface HubPlanItem { type: string; name: string; from?: string; to?: string }
 

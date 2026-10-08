@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { argvAllowed } from './argv.js';
-import { dockerRequest } from './docker.js';
+import { dockerRequest, isFileKind, readContainerFile, writeContainerFile } from './docker.js';
 
 // the only thing that holds the docker socket. argos reaches docker through here and gets exactly:
 // exec of an allowed cscli argv in the crowdsec container, reading that exec back, restarting crowdsec
@@ -83,6 +83,20 @@ createServer(async (req, res) => {
       console.log(`[proxy] restarting ${CONTAINER}`);
       const r = await dockerRequest(target, 'POST', `${forContainer('restart')}?t=${t}`);
       return send(r.status, r.data);
+    }
+    // argos' own two files in the crowdsec config, nothing else is readable or writable
+    if ((m = /^\/argos\/files\/([\w-]+)$/.exec(path))) {
+      if (!isFileKind(m[1])) return deny('unknown file');
+      if (req.method === 'GET') {
+        const content = await readContainerFile(target, CONTAINER, m[1]);
+        return content === null ? send(404, JSON.stringify({ message: 'not found' })) : send(200, JSON.stringify({ content }));
+      }
+      if (req.method === 'PUT') {
+        const body = await readJson(req);
+        console.log(`[proxy] writing ${m[1]} in ${CONTAINER}`);
+        await writeContainerFile(target, CONTAINER, m[1], body.content);
+        return send(200, JSON.stringify({ ok: true }));
+      }
     }
     return deny('not an allowed endpoint');
   } catch (e: any) {

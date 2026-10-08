@@ -1,6 +1,6 @@
 # Security
 
-Argos holds the keys to your CrowdSec: it can ban and unban, change detection rules and restart the engine through the Docker socket. Reports are taken seriously.
+Argos holds the keys to your CrowdSec: it can ban and unban, change detection rules and restart the engine. Reports are taken seriously.
 
 ## Reporting a vulnerability
 
@@ -16,5 +16,5 @@ Only the latest release gets fixes. Pin a version tag in production and update w
 
 - Keep it off the open internet if you can (VPN, Tailscale, an IP allow-list or an SSO proxy in front).
 - If it is public: HTTPS only, `TRUST_PROXY=true` behind your reverse proxy, and **Settings → Users → Require 2FA for everyone**.
-- The Docker socket is root on the host. Argos only runs an allow-list of `cscli` commands and never a shell, but whoever is admin in Argos can run those.
+- The Docker socket is root on the host. Only `argos-docker-proxy` holds it, and it lets through an allow-list of `cscli` commands (never a shell), a CrowdSec restart, `crowdsec -t` and Argos' own two config files. Whoever is admin in Argos can do those.
 - Give people the lowest role that works: viewer, then operator, admin only for the few who manage the engine.

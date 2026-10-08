@@ -22,11 +22,15 @@ const FREE_TEXT = new Set(['--comment', '--description', '--expiration']);
 const FLAGS = new Set(['--dry-run', '-a', '--global', '--name', ...FREE_TEXT]);
 const PLAIN = /^[\w.:/@,-]+$/;
 
+// the config check run before a profiles or whitelist change is restarted into
+export const CONFIG_TEST = ['crowdsec', '-c', `${(process.env.CROWDSEC_CONFIG_DIR ?? '/etc/crowdsec').replace(/\/+$/, '')}/config.yaml`, '-t'];
+
 /**
  * The full argv argos may exec in the crowdsec container. Every word is plain except the one value
  * after a free-text flag, which has to be last, so no extra flag can ride along inside a comment.
  */
 export function argvAllowed(cmd: unknown): boolean {
+  if (Array.isArray(cmd) && cmd.length === CONFIG_TEST.length && cmd.every((x, i) => x === CONFIG_TEST[i])) return true;
   if (!Array.isArray(cmd) || cmd.length < 2 || cmd.some((x) => typeof x !== 'string') || cmd[0] !== 'cscli') return false;
   let a = cmd.slice(1) as string[];
   if (a.at(-2) !== '--color' || a.at(-1) !== 'no') return false;
