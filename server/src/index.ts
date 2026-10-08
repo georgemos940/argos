@@ -54,7 +54,7 @@ app.onError((err, c) => {
 
 const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: https:",
-  "font-src 'self' data:", "connect-src 'self'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'",
+  "font-src 'self' data:", "connect-src 'self'", "worker-src 'self'", "manifest-src 'self'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'",
 ].join('; ');
 
 app.use('*', async (c, next) => {
@@ -739,6 +739,10 @@ app.get('/api/audit', admin, (c) =>
 // ---------------------------------------------------------------- web app
 app.use('/assets/*', serveStatic({ root: './dist/web' }));
 app.use('/logo.png', serveStatic({ path: './dist/web/logo.png' }));
+app.use('/icons/*', serveStatic({ root: './dist/web' }));
+app.use('/manifest.webmanifest', serveStatic({ path: './dist/web/manifest.webmanifest' }));
+// the worker must always be fresh or an old one keeps serving an old app
+app.use('/sw.js', serveStatic({ path: './dist/web/sw.js', onFound: (_p, c) => { c.header('Cache-Control', 'no-cache'); } }));
 let indexHtml = '';
 try { indexHtml = readFileSync('./dist/web/index.html', 'utf8'); } catch { indexHtml = '<p>web app not built</p>'; }
 app.get('*', (c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'not found' }, 404) : c.html(indexHtml)));

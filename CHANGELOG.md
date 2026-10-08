@@ -10,6 +10,7 @@ Versions follow [semver](https://semver.org). Docker images are tagged with the 
 - Ban policy page: ban length, escalation for repeat offenders, captcha first for web attacks, raw `profiles.yaml`; checked with `crowdsec -t` and rolled back if CrowdSec refuses it
 - Ignore rules: requests by path, host, user agent, method or status that never count toward a ban
 - Bouncer usage: dropped packets and bytes per bouncer and decision source
+- Installable as an app (PWA), opens offline to the last shell
 
 ## 1.0.0
 

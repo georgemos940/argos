@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, Ban, Bell, BookOpen, ExternalLink, EyeOff, Flame, Gavel, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
+  Activity, Ban, Bell, BookOpen, Download, ExternalLink, EyeOff, Flame, Gavel, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
 } from 'lucide-react';
 import { api, type Me } from './api';
 import { AskHost, cx } from './ui';
@@ -55,11 +55,26 @@ const LINKS = [
   { label: 'Console', href: 'https://app.crowdsec.net/', icon: LayoutGrid, title: 'CrowdSec Console: hub, blocklists, CTI keys' },
 ];
 
+// chrome/edge offer an install prompt for the pwa, we show it as a button
+type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+function useInstall() {
+  const [ev, setEv] = useState<InstallPrompt | null>(null);
+  useEffect(() => {
+    const h = (e: Event) => { e.preventDefault(); setEv(e as InstallPrompt); };
+    const done = () => setEv(null);
+    window.addEventListener('beforeinstallprompt', h);
+    window.addEventListener('appinstalled', done);
+    return () => { window.removeEventListener('beforeinstallprompt', h); window.removeEventListener('appinstalled', done); };
+  }, []);
+  return ev && (async () => { await ev.prompt(); await ev.userChoice; setEv(null); });
+}
+
 const loadCollapsed = () => { try { return localStorage.getItem('argos.nav.collapsed') === '1'; } catch { return false; } };
 
 function Sidebar({ me, open, onClose, onLogout }: { me: Me; open: boolean; onClose: () => void; onLogout: () => void }) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const [counts, setCounts] = useState<Counts | null>(null);
+  const install = useInstall();
   const role = me.user!.role;
   const mini = collapsed && !open;
 
@@ -152,6 +167,12 @@ function Sidebar({ me, open, onClose, onLogout }: { me: Me; open: boolean; onClo
             </a>
           ))}
         </div>
+        {install && (
+          <button onClick={install} title="Install Argos as an app"
+            className="group flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-400/10 to-violet-500/10 text-xs font-medium text-cyan-100 ring-1 ring-cyan-400/25 transition hover:ring-cyan-300/50">
+            <Download size={14} className="transition group-hover:translate-y-0.5" />{!mini && 'Install app'}
+          </button>
+        )}
         <div className={cx('flex items-center rounded-xl bg-white/[0.025] ring-1 ring-white/[0.05]', mini ? 'flex-col gap-2 py-2' : 'gap-3 p-2.5')}>
           <div className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-cyan-400/30 to-violet-500/30 font-display text-sm font-semibold text-white uppercase ring-1 ring-white/10"
             title={`${me.user!.username} · ${role}`}>
