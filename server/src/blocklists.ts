@@ -128,16 +128,21 @@ export function isLocal(addr: string): boolean {
   return !r || overlaps(r, RESERVED_V4);
 }
 
-export async function publicFetch(url: string, hops = 0): Promise<Response> {
+// any url an admin types (lists, webhooks, ntfy): public hosts only, redirects checked hop by hop
+export async function publicFetch(url: string, init: RequestInit = {}, hops = 0): Promise<Response> {
   const u = new URL(url);
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('only http(s) lists');
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('only http(s) urls');
   const host = u.hostname.replace(/^\[|\]$/g, '');
   const addrs = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
-  if (!addrs.length || addrs.some(isLocal)) throw new Error('list url points to a private address');
-  const res = await fetch(u, { headers: { 'User-Agent': 'argos/1.0' }, redirect: 'manual', signal: AbortSignal.timeout(60_000) });
-  if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+  if (!addrs.length || addrs.some(isLocal)) throw new Error('url points to a private address');
+  const res = await fetch(u, {
+    ...init, headers: { 'User-Agent': 'argos/1.0', ...(init.headers as Record<string, string> ?? {}) },
+    redirect: 'manual', signal: AbortSignal.timeout(60_000),
+  });
+  // only a plain get follows redirects; a post never gets re-sent somewhere else
+  if (res.status >= 300 && res.status < 400 && res.headers.get('location') && (init.method ?? 'GET') === 'GET') {
     if (hops >= 3) throw new Error('too many redirects');
-    return publicFetch(new URL(res.headers.get('location')!, u).toString(), hops + 1);
+    return publicFetch(new URL(res.headers.get('location')!, u).toString(), init, hops + 1);
   }
   return res;
 }

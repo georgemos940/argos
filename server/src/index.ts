@@ -23,10 +23,14 @@ import {
 import { query, range, scalar } from './prom.js';
 import { cloudflareConfigured, setLevel, zones } from './cloudflare.js';
 import {
-  EMBED_FIELDS, defaultEmbed, notifySettings, onAlert, sendDiscord, startNotifier, vars, type EmbedStyle, type NotifySettings,
+  EMBED_FIELDS, defaultEmbed, notifySettings, onAlert, sendDiscord, sendDiscordDigest, startNotifier, vars, type EmbedStyle, type NotifySettings,
 } from './notifier.js';
 import { reputation, type RepMode } from './reputation.js';
 import { mountDemo } from './demo.js';
+import {
+  digestMessage, digestSettings, publicChannels, removeChannel, saveChannel, send as sendToChannel, sendDigest, startDigest,
+  listChannels, type DigestSettings,
+} from './channels.js';
 
 type Env = { Variables: { user: User } };
 const app = new Hono<Env>();
@@ -551,6 +555,47 @@ app.post('/api/notifications/test', admin, async (c) => {
   return c.json({ ok: true });
 });
 
+// ---------------------------------------------------------------- channels and digest
+app.get('/api/channels', admin, (c) => c.json(publicChannels()));
+app.put('/api/channels', admin, async (c) => {
+  const ch = saveChannel(await c.req.json());
+  audit(who(c), 'channel.save', `${ch.type}:${ch.name}`);
+  return c.json(publicChannels());
+});
+app.delete('/api/channels/:id', admin, (c) => {
+  removeChannel(c.req.param('id'));
+  audit(who(c), 'channel.delete', c.req.param('id'));
+  return c.json(publicChannels());
+});
+app.post('/api/channels/:id/test', admin, async (c) => {
+  const ch = listChannels().find((x) => x.id === c.req.param('id'));
+  if (!ch) return c.json({ error: 'no such channel' }, 404);
+  await sendToChannel(ch, { title: 'Argos test', lines: ['If you can read this, the channel works.'], severity: 'default' }, { test: true });
+  return c.json({ ok: true });
+});
+
+app.get('/api/digest', admin, async (c) => {
+  const window = c.req.query('window') === '24h' ? '24h' : '7d';
+  return c.json({ settings: digestSettings(), preview: (await digestMessage(window)).msg });
+});
+app.put('/api/digest', admin, async (c) => {
+  const b = (await c.req.json()) as Partial<DigestSettings>;
+  const cur = digestSettings();
+  const next: DigestSettings = {
+    daily: b.daily ?? cur.daily, weekly: b.weekly ?? cur.weekly, discord: b.discord ?? cur.discord,
+    hour: Math.min(23, Math.max(0, Math.round(Number(b.hour ?? cur.hour)))),
+    weekday: Math.min(6, Math.max(0, Math.round(Number(b.weekday ?? cur.weekday)))),
+  };
+  setSetting('digest', next);
+  audit(who(c), 'digest.update', undefined, next);
+  return c.json({ settings: next });
+});
+app.post('/api/digest/send', admin, async (c) => {
+  const window = (await c.req.json().catch(() => ({}))).window === '24h' ? '24h' : '7d';
+  const errors = await sendDigest(window, sendDiscordDigest);
+  return c.json({ ok: !errors.length, errors });
+});
+
 // ---------------------------------------------------------------- grafana alert relay
 app.post('/hooks/grafana', async (c) => {
   if (!checkToken(c.req.header('authorization'))) return c.json({ error: 'unauthorized' }, 401);
@@ -641,5 +686,6 @@ app.get('*', (c) => (c.req.path.startsWith('/api/') ? c.json({ error: 'not found
 if (!config.demo) {
   startNotifier();
   startBlocklists();
+  startDigest(sendDiscordDigest);
 }
 serve({ fetch: app.fetch, port: config.port, hostname: '0.0.0.0' }, (i) => console.log(`Argos on :${i.port}`));

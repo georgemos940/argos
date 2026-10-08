@@ -110,6 +110,20 @@ const routes: Record<string, (c: any) => unknown> = {
     scenario_full: 'crowdsecurity/http-sensitive-files', events: '42', network: 'Contabo GmbH', asn: 'AS51167', range: '185.220.101.0/24',
     site: 'shop.example.com', duration: '4h', decision: 'Banned for **4h**' }, banned: true, at: new Date(now() - 120000).toISOString() }),
   '/api/grafana-relay': () => ({ webhookSet: true, lastAt: now() - 3600_000, lastStatus: 'resolved', sent: 27, token: 'demo-token', port: 3000 }),
+  '/api/channels': () => [
+    { id: 't1', type: 'telegram', name: 'Ops Telegram', enabled: true, alerts: true, digest: true, config: { token: '••••••', chatId: '-1001234567890' } },
+    { id: 'n1', type: 'ntfy', name: 'Phone (ntfy)', enabled: true, alerts: true, digest: false, config: { topic: 'argos-alerts', server: 'https://ntfy.sh', token: '' } },
+    { id: 'e1', type: 'email', name: 'Weekly email', enabled: true, alerts: false, digest: true,
+      config: { host: 'smtp.example.com', port: '587', user: 'argos', pass: '••••••', from: 'argos@example.com', to: 'team@example.com' } },
+  ],
+  '/api/digest': () => {
+    const s = summarize(alerts, '7d');
+    return { settings: { daily: false, weekly: true, hour: 9, weekday: 1, discord: true }, preview: { title: 'Argos weekly summary', severity: 'default', lines: [
+      `${s.totals.alerts} attacks from ${s.totals.uniqueIps} IPs, ${alerts.filter((a) => a.decisions?.length).length} led to a ban`,
+      `Top attacks: ${s.scenarios.slice(0, 3).map((x) => `${x.key.replace(/^crowdsecurity\//, '')} (${x.count})`).join(', ')}`,
+      `Sites hit most: ${s.sites.slice(0, 3).map((x) => `${x.key} (${x.count})`).join(', ')}`,
+    ] } };
+  },
   '/api/console': () => ({ console_management: false, context: true, custom: true, manual: true, tainted: true }),
   '/api/settings': () => ({ ctiKeySet: true, abuseKeySet: true, repMode: 'auto', require2fa: true }),
   '/api/users': () => [{ id: 1, username: 'demo', role: 'admin', totp: 1, created_at: now() - 30 * 86400_000 },

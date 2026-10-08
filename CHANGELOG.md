@@ -2,6 +2,12 @@
 
 Versions follow [semver](https://semver.org). Docker images are tagged with the version (`1.0.0`, `1.0`) and `latest` follows `main`.
 
+## Unreleased
+
+- Argos no longer holds the Docker socket: `argos-docker-proxy` does and only lets allowed `cscli` execs and a CrowdSec restart through
+- Notification channels: Telegram, Slack, ntfy, email, JSON webhook with an HMAC signature
+- Daily / weekly summary to Discord and any channel
+
 ## 1.0.0
 
 First release.

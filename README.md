@@ -31,6 +31,7 @@
 - **Tools**: `cscli explain` log tester and CrowdSec Console enrollment
 - **Cloudflare**: Under Attack mode per zone, with a req/s chart from Prometheus
 - **Discord**: new attacks as embeds you design in the UI with a live preview, with per-IP cooldown and an hourly cap
+- **More channels**: Telegram, Slack, ntfy (phone push), email and signed JSON webhooks, plus a **daily or weekly summary** of attacks, bans, top countries and sites
 - **Grafana alert relay**: turns Grafana's webhook into proper Discord embeds (severity colour, value, labels, links)
 - **Users**: admin / operator / viewer roles, TOTP 2FA, audit log of every change
 

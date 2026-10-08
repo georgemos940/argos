@@ -1,6 +1,7 @@
 import { getAlerts, type Alert } from './lapi.js';
 import { getSetting, setSetting } from './db.js';
 import { slim } from './stats.js';
+import { alertMessage, broadcast, listChannels, type Message } from './channels.js';
 
 export const EMBED_FIELDS = ['country', 'network', 'events', 'decision', 'site', 'range'] as const;
 export type EmbedField = (typeof EMBED_FIELDS)[number];
@@ -140,7 +141,8 @@ async function poll(): Promise<void> {
   for (const a of fresh) for (const l of listeners) l(slim(a));
 
   const s = notifySettings();
-  if (!s.enabled || !s.webhook) return;
+  const discord = s.enabled && !!s.webhook;
+  if (!discord && !listChannels().some((c) => c.enabled && c.alerts)) return;
   const inc = s.scenarioInclude ? new RegExp(s.scenarioInclude) : null;
   const exc = s.scenarioExclude ? new RegExp(s.scenarioExclude) : null;
   const now = Date.now();
@@ -158,7 +160,24 @@ async function poll(): Promise<void> {
   if (!pick.length || sentThisHour.n >= s.maxPerHour) return;
   for (const a of pick) lastByIp.set(a.source.value, now);
   sentThisHour.n++;
-  await sendDiscord(s, pick);
+  if (discord) await sendDiscord(s, pick).catch((e) => console.error('[notifier] discord', e.message));
+  await broadcast('alerts', alertMessage(pick), pick.map(slim));
+}
+
+export async function sendDiscordDigest(msg: Message): Promise<void> {
+  const s = notifySettings();
+  if (!s.webhook) return;
+  const res = await fetch(s.webhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: s.embed.username || 'Argos', avatar_url: s.embed.avatarUrl || undefined,
+      embeds: [{ title: msg.title, description: msg.lines.map((l) => `• ${l}`).join('\n'), color: 0x22d3ee,
+        url: s.embed.linkBase || undefined, footer: { text: 'Argos' }, timestamp: new Date().toISOString() }],
+      allowed_mentions: { parse: [] },
+    }),
+  });
+  if (!res.ok) throw new Error(`discord ${res.status}`);
 }
 
 export function startNotifier(): void {

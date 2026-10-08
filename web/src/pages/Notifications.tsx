@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Activity, Bell, Copy, Braces, Filter, Palette, RotateCcw, Save, Send, Webhook } from 'lucide-react';
 import { api } from '../api';
+import { ChannelsCard, DigestCard } from './Channels';
 import { Button, Card, ErrorBox, Field, Skeleton, SkeletonCard, Switch, ago, cx, inputCls, toast, useAsync } from '../ui';
 
 const FIELDS = [
@@ -324,6 +325,9 @@ export default function Notifications() {
               <Field label="Max messages per hour" hint="Hard cap; each message groups up to 10 alerts."><input type="number" min={1} max={120} className={inputCls} value={s.maxPerHour} onChange={(e) => up('maxPerHour', Number(e.target.value))} /></Field>
             </div>
           </Card>
+
+          <ChannelsCard />
+          <DigestCard />
 
           <GrafanaRelay />
         </div>
