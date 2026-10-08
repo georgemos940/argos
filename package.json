@@ -10,7 +10,8 @@
     "dev:web": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test server/test/*.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",

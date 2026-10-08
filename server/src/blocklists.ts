@@ -119,7 +119,7 @@ export function parse(text: string, cf: { v4: [number, number][]; v6: string[] }
 
 // list urls are typed by an admin: never let them reach the lapi, docker, the lan or cloud metadata
 const LOCAL_V6 = /^(::1?$|fc|fd|fe[89ab]|::ffff:)/i;
-function isLocal(addr: string): boolean {
+export function isLocal(addr: string): boolean {
   if (addr.includes(':')) {
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(addr);
     return mapped ? isLocal(mapped[1]) : LOCAL_V6.test(addr);
@@ -128,7 +128,7 @@ function isLocal(addr: string): boolean {
   return !r || overlaps(r, RESERVED_V4);
 }
 
-async function publicFetch(url: string, hops = 0): Promise<Response> {
+export async function publicFetch(url: string, hops = 0): Promise<Response> {
   const u = new URL(url);
   if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('only http(s) lists');
   const host = u.hostname.replace(/^\[|\]$/g, '');

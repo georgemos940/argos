@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/georgemos940/crowdsec-argos-ui/security/advisories/new
+    about: Privately, please. Never in a public issue.
+  - name: CrowdSec itself
+    url: https://discourse.crowdsec.net/
+    about: Questions about scenarios, parsers or bouncers belong to the CrowdSec community.

@@ -1,0 +1,20 @@
+name: Feature request
+description: An idea that would make Argos more useful
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The problem first, the solution second.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How you picture it
+  - type: textarea
+    id: else
+    attributes:
+      label: Anything else
+      description: Screenshots, links, how other tools do it.

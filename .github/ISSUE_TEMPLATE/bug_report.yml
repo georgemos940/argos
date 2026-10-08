@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+  - type: input
+    id: version
+    attributes:
+      label: Argos version
+      placeholder: v1.0.0 or the image digest
+    validations:
+      required: true
+  - type: input
+    id: crowdsec
+    attributes:
+      label: CrowdSec version
+      placeholder: output of `cscli version`
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`docker logs argos` around the time it happened. Remove anything private."
+      render: text
+  - type: markdown
+    attributes:
+      value: "Found a security problem? Do not open an issue, use **Security → Report a vulnerability** instead."
