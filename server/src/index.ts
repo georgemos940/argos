@@ -341,7 +341,7 @@ const HUB_TYPES = ['scenarios', 'collections', 'parsers', 'postoverflows', 'cont
 app.post('/api/hub/:type/:op', admin, async (c) => {
   const { type, op } = c.req.param();
   const { name } = await c.req.json();
-  if (!HUB_TYPES.includes(type) || !['install', 'remove'].includes(op) || !/^[\w./-]+$/.test(name))
+  if (!HUB_TYPES.includes(type) || !['install', 'remove'].includes(op) || !/^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w-]*(?:\.[\w-]+)*$/.test(name))
     return c.json({ error: 'bad request' }, 400);
   await cscli([type, op, name], false);
   audit(who(c), `hub.${op}`, `${type}/${name}`);

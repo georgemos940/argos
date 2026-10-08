@@ -19,18 +19,23 @@ function docker(method: string, path: string, body?: unknown): Promise<{ status:
 }
 
 // the docker socket is root, so only these commands go through
+// hub items are author/name, nothing that looks like a path
+const ITEM = String.raw`[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w-]*(?:\.[\w-]+)*`;
+
 const ALLOWED: RegExp[] = [
   /^(bouncers|machines) list$/,
   /^(hub) (list|update|upgrade)( --dry-run| -a)?$/,
-  /^simulation (status|enable|disable)( [\w./-]+)?$/,
+  new RegExp(`^simulation (status|enable|disable)( ${ITEM}| --global)?$`),
   /^console (status|enable|disable)( [\w-]+)?$/,
   /^console enroll [\w-]{10,64} --name [\w.-]{1,64}$/,
   /^metrics show appsec$/,
-  /^(scenarios|collections|parsers|postoverflows|contexts|appsec-rules|appsec-configs) (list|inspect|install|remove)( [\w./-]+)?$/,
+  new RegExp(`^(scenarios|collections|parsers|postoverflows|contexts|appsec-rules|appsec-configs) (list|inspect|install|remove)( ${ITEM})?$`),
   /^allowlists (list|inspect|create|add|remove|delete)( [\w.:/-]+)*( --(description|expiration|comment) .+)?$/,
   /^metrics( show [\w,-]+)?$/,
   /^decisions list$/,
 ];
+
+export const isAllowed = (line: string) => ALLOWED.some((re) => re.test(line));
 
 export async function restartCrowdsec(): Promise<void> {
   const r = await docker('POST', `/containers/${config.crowdsecContainer}/restart?t=20`);
@@ -65,7 +70,7 @@ export function parsePlan(out: string): { steps: { action: string; items: HubPla
 
 export async function cscli(args: string[], json = true): Promise<any> {
   const line = args.join(' ');
-  if (!ALLOWED.some((re) => re.test(line))) throw new Error(`cscli command not allowed: ${line}`);
+  if (!isAllowed(line)) throw new Error(`cscli command not allowed: ${line}`);
   return exec(['cscli', ...args, ...(json ? ['-o', 'json'] : []), '--color', 'no'], json);
 }
 
