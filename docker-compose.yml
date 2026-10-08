@@ -1,0 +1,26 @@
+services:
+  argos:
+    image: ghcr.io/georgemos940/crowdsec-argos-ui:latest
+    # or build it yourself:
+    # build: .
+    container_name: argos
+    restart: unless-stopped
+    ports:
+      # keep it off the public internet: bind to localhost or a vpn address and put a reverse proxy in front
+      - "127.0.0.1:3010:3000"
+    env_file: .env
+    volumes:
+      - data:/data
+      # cscli, hub installs and crowdsec restarts run through the docker socket (see README, security)
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - crowdsec
+
+volumes:
+  data:
+
+networks:
+  crowdsec:
+    external: true
+    # the network your crowdsec container is on
+    name: ${CROWDSEC_NETWORK:-crowdsec}

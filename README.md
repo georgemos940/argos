@@ -1,0 +1,127 @@
+<p align="center">
+  <img src="web/public/logo.png" width="96" alt="">
+</p>
+
+<h1 align="center">Argos</h1>
+
+<p align="center">
+  <i>Argos Panoptes, the hundred-eyed watchman who never slept.</i><br><br>
+  A self-hosted control panel for <a href="https://www.crowdsec.net/">CrowdSec</a>.<br>
+  Live attack map, alerts, bans, blocklists, WAF, hub store, Cloudflare and Discord, in one fast UI.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/CrowdSec-1.6%2B-7b61ff" alt="">
+  <img src="https://img.shields.io/badge/node-22-339933" alt="">
+  <img src="https://img.shields.io/badge/license-MIT-22d3ee" alt="">
+</p>
+
+![Overview](docs/screenshots/overview.png)
+
+## Features
+
+- **Live overview**: attacks, attacking IPs, bans and the community blocklist at a glance, a world map with an arc from every attacker to your server, and a live feed over server-sent events
+- **Alerts**: every detection with the requests behind it (path, status, user agent, site)
+- **Bans**: ban or unban IPs, ranges, countries or AS numbers; bulk ban; captcha instead of ban
+- **IP profile**: history, sites and paths hit, reputation from CrowdSec CTI or AbuseIPDB (auto falls back when one runs out of quota)
+- **Blocklists**: Spamhaus DROP, FireHOL level 1, Tor exits, AbuseIPDB top offenders or any URL, refreshed on a schedule. Private ranges, your own IPs and Cloudflare are always skipped
+- **Web firewall**: CrowdSec AppSec metrics, blocked requests and the rules that fired
+- **Hub store**: browse and install collections, scenarios, parsers and AppSec rules; upgrade everything with a dry-run preview; CrowdSec restarts on its own
+- **Simulation mode** per scenario, to try a rule without banning anyone
+- **Tools**: `cscli explain` log tester and CrowdSec Console enrollment
+- **Cloudflare**: Under Attack mode per zone, with a req/s chart from Prometheus
+- **Discord**: new attacks as embeds you design in the UI with a live preview, with per-IP cooldown and an hourly cap
+- **Grafana alert relay**: turns Grafana's webhook into proper Discord embeds (severity colour, value, labels, links)
+- **Users**: admin / operator / viewer roles, TOTP 2FA, audit log of every change
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/ip-profile.png" alt="IP profile"></td>
+    <td><img src="docs/screenshots/blocklists.png" alt="Blocklists"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/notifications.png" alt="Discord notifications"></td>
+    <td><img src="docs/screenshots/hub-store.png" alt="Hub store"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/waf.png" alt="Web firewall"></td>
+    <td><img src="docs/screenshots/bans.png" alt="Bans"></td>
+  </tr>
+</table>
+
+## Quick start
+
+CrowdSec must already run in Docker. The panel talks to its Local API as a machine and runs `cscli` inside the CrowdSec container.
+
+**1. Create a machine for the panel**
+
+```sh
+PW=$(openssl rand -hex 32)
+# -f /dev/null keeps cscli from overwriting crowdsec's own credentials file
+docker exec crowdsec cscli machines add argos --password "$PW" -f /dev/null
+echo "$PW"
+```
+
+**2. Configure**
+
+```sh
+cp .env.example .env
+# set LAPI_PASSWORD to the password above and SESSION_SECRET to: openssl rand -hex 32
+```
+
+**3. Run**
+
+```sh
+docker compose up -d
+docker logs argos | grep 'Setup token'
+```
+
+Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
+
+> CrowdSec rejects LAPI logins whose User-Agent is not `name/version`; the panel already sends one.
+
+## Configuration
+
+| Variable | Default | |
+|---|---|---|
+| `SESSION_SECRET` | | required, signs sessions |
+| `LAPI_URL` | `http://crowdsec:8080` | CrowdSec Local API |
+| `LAPI_USER` / `LAPI_PASSWORD` | | the machine from step 1 |
+| `CROWDSEC_CONTAINER` | `crowdsec` | container name for `cscli` and restarts |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | |
+| `DATA_DIR` | `./data` | SQLite database (users, settings, audit) |
+| `INSTANCE_NAME` | `crowdsec` | shown in the sidebar, used for Console enrollment |
+| `HOME_LAT` / `HOME_LON` | Frankfurt | your server on the attack map |
+| `SELF_IPS` | | IPs or ranges blocklists must never ban |
+| `PROM_URL` | `http://prometheus:9090` | optional, charts |
+| `CF_API_TOKEN` / `CF_ZONE_IDS` | | optional, Cloudflare Under Attack switch. Token needs Zone Settings edit |
+| `ZONE_RPS_QUERY` | | optional, Prometheus query with a `zone` label for the Cloudflare chart |
+| `COOKIE_SECURE` | `true` | set `false` only when serving over plain http |
+
+API keys for CrowdSec CTI and AbuseIPDB, the Discord webhooks and blocklists are set in the UI.
+
+## Grafana alerts to Discord
+
+Grafana's Discord integration only fills the embed title. Point a **webhook** contact point at the panel instead. **Notifications → Grafana alerts** shows the URL and the bearer token to copy, and takes the Discord webhook the embeds go to. Grafana reaches the panel over the Docker network (`http://argos:3000/hooks/grafana`).
+
+## Security
+
+- The panel mounts the Docker socket. That is root on the host, so:
+  - only an allow-list of `cscli` commands can run (`server/src/cscli.ts`); the explain tool passes the log line as a single argument, never through a shell
+  - do not expose it to the internet. Bind it to localhost or a VPN address and put it behind a reverse proxy with an IP allow-list or SSO
+- Passwords are hashed with scrypt, sessions are HTTP-only cookies, failed logins are rate limited per IP
+- Every change is written to the audit log
+
+## Development
+
+```sh
+npm install
+npm run dev:web       # vite on :5173, proxies /api to :3000
+SESSION_SECRET=dev LAPI_USER=... LAPI_PASSWORD=... LAPI_URL=http://localhost:8080 COOKIE_SECURE=false npm run dev:server
+```
+
+Stack: Node 22, Hono, node:sqlite, React 19, Vite, Tailwind 4, Recharts, d3-geo.
+
+## License
+
+MIT
