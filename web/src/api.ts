@@ -26,6 +26,7 @@ export interface Me {
   mustEnroll?: boolean;
   instance: string;
   home?: [number, number];
+  demo?: boolean;
 }
 
 export interface SlimAlert {

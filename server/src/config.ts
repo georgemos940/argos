@@ -4,13 +4,17 @@ const env = (name: string, fallback?: string): string => {
   return v;
 };
 
+const demo = process.env.DEMO === '1' || process.env.DEMO === 'true';
+
 export const config = {
+  // generated data, no crowdsec needed, read-only
+  demo,
   port: Number(env('PORT', '3000')),
   dataDir: env('DATA_DIR', './data'),
-  sessionSecret: env('SESSION_SECRET'),
+  sessionSecret: env('SESSION_SECRET', demo ? 'demo' : undefined),
   lapiUrl: env('LAPI_URL', 'http://crowdsec:8080'),
   lapiUser: env('LAPI_USER', 'argos'),
-  lapiPassword: env('LAPI_PASSWORD'),
+  lapiPassword: env('LAPI_PASSWORD', demo ? 'demo' : undefined),
   promUrl: env('PROM_URL', 'http://prometheus:9090'),
   crowdsecContainer: env('CROWDSEC_CONTAINER', 'crowdsec'),
   dockerSocket: env('DOCKER_SOCKET', '/var/run/docker.sock'),

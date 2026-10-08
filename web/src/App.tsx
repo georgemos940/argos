@@ -257,6 +257,9 @@ export default function App() {
               className="w-full rounded-xl bg-white/[0.04] py-2.5 pr-14 pl-10 text-sm text-slate-100 ring-1 ring-white/10 transition placeholder:text-slate-500 hover:ring-white/20 focus:bg-ink-900 focus:ring-2 focus:ring-cyan-400/50 focus:outline-none" />
             <kbd className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 rounded-md bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 ring-1 ring-white/10">Enter</kbd>
           </form>
+          {me.demo && (
+            <span title="Generated data. Changes are disabled." className="ml-auto hidden rounded-full bg-violet-500/15 px-3 py-1 text-[11px] font-semibold tracking-wide text-violet-200 ring-1 ring-violet-400/30 sm:inline">DEMO · generated data</span>
+          )}
           <Clock />
         </div>
         <div className="mx-auto max-w-[1600px] p-4 lg:p-10">
