@@ -2,12 +2,22 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+// the crowdsec this browser looks at, when argos has more than one
+const KEY = 'argos.instance';
+export const selectedInstance = () => { try { return localStorage.getItem(KEY) ?? ''; } catch { return ''; } };
+export function selectInstance(id: string) {
+  try { if (id === 'main') localStorage.removeItem(KEY); else localStorage.setItem(KEY, id); } catch { /* private mode */ }
+}
+
 export async function api<T = any>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, ...rest } = init;
   const res = await fetch(`/api${path}`, {
     credentials: 'same-origin',
     ...rest,
-    headers: { 'X-Argos': '1', ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(rest.headers ?? {}) },
+    headers: {
+      'X-Argos': '1', ...(selectedInstance() ? { 'X-Argos-Instance': selectedInstance() } : {}),
+      ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(rest.headers ?? {}),
+    },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   });
   const text = await res.text();
@@ -28,6 +38,8 @@ export interface Me {
   ssoLinked?: boolean;
   sso?: { label: string } | null;
   instance: string;
+  instanceId?: string;
+  instances?: { id: string; name: string }[];
   home?: [number, number];
   demo?: boolean;
 }

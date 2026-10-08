@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Check, Copy, Fingerprint, KeyRound, KeySquare, LogIn, Plus, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { Check, Copy, Fingerprint, KeyRound, KeySquare, LogIn, Plus, Server, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
 import { addPasskey, deviceName, passkeysSupported } from '../passkey';
 import { api, type Me } from '../api';
 import { can } from '../App';
@@ -23,6 +23,7 @@ export default function Settings({ me, reload }: { me: Me; reload: () => void })
         {admin && <UsersCard me={me.user!.username} />}
         {admin && <Tokens />}
         {admin && <SsoSetup />}
+        {admin && <Instances reload={reload} />}
         {admin && <Integrations />}
       </div>
     </div>
@@ -418,5 +419,93 @@ function SsoSetup() {
         <Button tone="primary" disabled={busy} onClick={save}>Save</Button>
       </div>
     </Card>
+  );
+}
+
+interface Inst {
+  id: string; name: string; lapiUrl: string; lapiUser: string; lapiPassword: string; dockerProxyUrl: string; dockerProxyToken: string;
+  container: string; promUrl: string; main: boolean; cscli: boolean; status?: { lapi: string; docker: string };
+}
+const BLANK: Inst = { id: '', name: '', lapiUrl: 'http://', lapiUser: 'argos', lapiPassword: '', dockerProxyUrl: '', dockerProxyToken: '', container: 'crowdsec', promUrl: '', main: false, cscli: false };
+
+function Instances({ reload: reloadMe }: { reload: () => void }) {
+  const { data, reload } = useAsync(() => api<Inst[]>('/instances'), []);
+  const [edit, setEdit] = useState<Inst | null>(null);
+  const del = async (i: Inst) => {
+    if (!await ask({ title: `Remove ${i.name}?`, body: 'Argos stops watching it. Nothing changes on that server.', tone: 'danger', confirmLabel: 'Remove' })) return;
+    await api(`/instances/${i.id}`, { method: 'DELETE' });
+    toast(`${i.name} removed`);
+    reload(); reloadMe();
+  };
+  const dot = (s?: string) => <span className={`inline-block h-2 w-2 rounded-full ${s === 'ok' ? 'bg-emerald-400' : s === 'not set' ? 'bg-slate-600' : 'bg-rose-400'}`} title={s} />;
+  return (
+    <Card title="CrowdSec instances" icon={<Server size={16} />} className="xl:col-span-2"
+      subtitle="More CrowdSec servers in one Argos. Switch between them at the top; alerts from all of them reach your channels and blocklists go to all of them."
+      actions={<Button onClick={() => setEdit({ ...BLANK })}><Plus size={14} /> Add</Button>}>
+      {!data && <SkeletonList rows={2} />}
+      <ul className="divide-y divide-white/5">
+        {(data ?? []).map((i) => (
+          <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm text-white">{i.name}{i.main && <Badge tone="cyan">main · from env</Badge>}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span className="flex items-center gap-1.5">{dot(i.status?.lapi)} LAPI <span className="font-mono">{i.lapiUrl}</span></span>
+                <span className="flex items-center gap-1.5">{dot(i.status?.docker)} cscli {i.dockerProxyUrl ? <span className="font-mono">{i.dockerProxyUrl}</span> : i.cscli ? 'docker socket' : 'off'}</span>
+              </div>
+              {i.status && i.status.lapi !== 'ok' && <div className="mt-1 text-xs text-rose-300">LAPI: {i.status.lapi}</div>}
+              {i.status && !['ok', 'not set'].includes(i.status.docker) && <div className="mt-1 text-xs text-rose-300">cscli: {i.status.docker}</div>}
+            </div>
+            {!i.main && (
+              <div className="flex gap-1">
+                <Button tone="ghost" onClick={() => setEdit(i)}>Edit</Button>
+                <Button tone="ghost" onClick={() => del(i)}><Trash2 size={14} /></Button>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      {edit && <InstanceModal inst={edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); reload(); reloadMe(); }} />}
+    </Card>
+  );
+}
+
+function InstanceModal({ inst, onClose, onDone }: { inst: Inst; onClose: () => void; onDone: () => void }) {
+  const isNew = !inst.id;
+  const [f, setF] = useState<Inst>(inst);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [probe, setProbe] = useState<{ lapi: string; docker: string } | null>(null);
+  const set = (patch: Partial<Inst>) => setF((x) => ({ ...x, ...patch }));
+  const id = isNew ? f.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) : f.id;
+  const run = async (fn: () => Promise<void>) => { setBusy(true); setError(null); try { await fn(); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
+  const test = () => run(async () => setProbe(await api('/instances/test', { method: 'POST', json: { ...f, id } })));
+  const save = () => run(async () => { await api(`/instances/${id}`, { method: 'PUT', json: f }); toast(`${f.name} saved`); onDone(); });
+  const input = (k: keyof Inst, label: string, hint?: string, ph?: string, type = 'text') => (
+    <Field label={label} hint={hint}><input type={type} className={inputCls} value={String(f[k] ?? '')} placeholder={ph} onChange={(e) => set({ [k]: e.target.value } as Partial<Inst>)} /></Field>
+  );
+  return (
+    <Modal open onClose={onClose} title={isNew ? 'Add a CrowdSec' : `Edit ${inst.name}`} wide>
+      <div className="grid gap-4 md:grid-cols-2">
+        {input('name', 'Name', 'Shown in the switcher and on alerts.', 'edge-fra-2')}
+        {input('lapiUrl', 'LAPI URL', 'Reach it over a VPN (Tailscale, WireGuard), not the open internet.', 'http://100.64.0.12:8080')}
+        {input('lapiUser', 'Machine name', 'cscli machines add argos --password … on that server')}
+        {input('lapiPassword', 'Machine password', undefined, undefined, 'password')}
+        {input('dockerProxyUrl', 'Docker proxy URL (optional)', 'Its argos-docker-proxy, for cscli, the hub, ban policy and ignore rules.', 'http://100.64.0.12:2375')}
+        {input('dockerProxyToken', 'Docker proxy token', 'PROXY_TOKEN on that server.', undefined, 'password')}
+        {input('container', 'CrowdSec container', undefined, 'crowdsec')}
+        {input('promUrl', 'Prometheus URL (optional)', 'For the decision counts on the overview.')}
+      </div>
+      {probe && (
+        <div className="mt-4 space-y-1 rounded-xl bg-ink-950/50 p-3 text-sm ring-1 ring-white/[0.05]">
+          <div className={probe.lapi === 'ok' ? 'text-emerald-300' : 'text-rose-300'}>LAPI: {probe.lapi === 'ok' ? 'signed in, alerts readable' : probe.lapi}</div>
+          <div className={probe.docker === 'ok' ? 'text-emerald-300' : probe.docker === 'not set' ? 'text-slate-500' : 'text-rose-300'}>Docker proxy: {probe.docker === 'ok' ? 'cscli works' : probe.docker}</div>
+        </div>
+      )}
+      <ErrorBox error={error} />
+      <div className="mt-5 flex justify-end gap-2">
+        <Button tone="ghost" disabled={busy} onClick={test}>Test connection</Button>
+        <Button tone="primary" disabled={busy || !f.name.trim() || id.length < 2} onClick={save}>Save</Button>
+      </div>
+    </Modal>
   );
 }

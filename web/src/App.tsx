@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'reac
 import {
   Activity, Ban, Bell, BookOpen, Download, ScanSearch, ExternalLink, EyeOff, Flame, Gavel, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
 } from 'lucide-react';
-import { api, type Me } from './api';
+import { api, selectInstance, selectedInstance, type Me } from './api';
 import { AskHost, cx, toast } from './ui';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
@@ -262,6 +262,11 @@ export default function App() {
     return () => window.removeEventListener('argos:signed-out', h);
   }, [load]);
 
+  // a removed instance: back to the one the server answered for
+  useEffect(() => {
+    if (me?.instanceId && selectedInstance() && selectedInstance() !== me.instanceId) selectInstance(me.instanceId);
+  }, [me?.instanceId]);
+
   // linking sso from settings comes back here when it fails
   const signedIn = !!me?.user;
   useEffect(() => {
@@ -291,6 +296,16 @@ export default function App() {
               className="w-full rounded-xl bg-white/[0.04] py-2.5 pr-14 pl-10 text-sm text-slate-100 ring-1 ring-white/10 transition placeholder:text-slate-500 hover:ring-white/20 focus:bg-ink-900 focus:ring-2 focus:ring-cyan-400/50 focus:outline-none" />
             <kbd className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 rounded-md bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 ring-1 ring-white/10">Enter</kbd>
           </form>
+          {(me.instances?.length ?? 0) > 1 && (
+            <label className="relative ml-auto flex items-center" title="Which CrowdSec you are looking at">
+              <Server size={14} className="pointer-events-none absolute left-3 text-cyan-300" />
+              <select value={me.instanceId} onChange={(e) => { selectInstance(e.target.value); window.location.reload(); }}
+                className="h-10 appearance-none rounded-xl bg-white/[0.04] pr-8 pl-9 text-sm font-medium text-slate-100 ring-1 ring-white/10 transition hover:ring-white/20 focus:ring-2 focus:ring-cyan-400/50 focus:outline-none">
+                {me.instances!.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+              </select>
+              <span className="pointer-events-none absolute right-3 text-[10px] text-slate-500">▼</span>
+            </label>
+          )}
           {me.demo && (
             <span title="Generated data. Changes are disabled." className="ml-auto hidden rounded-full bg-violet-500/15 px-3 py-1 text-[11px] font-semibold tracking-wide text-violet-200 ring-1 ring-violet-400/30 sm:inline">DEMO · generated data</span>
           )}

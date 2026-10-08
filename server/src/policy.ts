@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { getSetting, setSetting } from './db.js';
+import { scoped } from './instances.js';
 import { readCrowdsecFile, restartCrowdsec, testConfig, writeCrowdsecFile } from './cscli.js';
 import { lapiHealth } from './lapi.js';
 import type { FileKind } from './docker.js';
@@ -36,7 +37,7 @@ export async function applyFile(kind: FileKind, content: string, empty: string):
       await writeCrowdsecFile(kind, old ?? empty);
       throw new Error(`crowdsec refused it, nothing changed: ${fatal(e.message)}`);
     }
-    if (old !== null) setSetting(`backup.${kind}`, { content: old, at: Date.now() });
+    if (old !== null) setSetting(scoped(`backup.${kind}`), { content: old, at: Date.now() });
     const r = await restartAndWait();
     if (!r.back) {
       await writeCrowdsecFile(kind, old ?? empty);
@@ -49,7 +50,7 @@ export async function applyFile(kind: FileKind, content: string, empty: string):
   }
 }
 
-export const backupOf = (kind: FileKind) => getSetting<{ content: string; at: number } | null>(`backup.${kind}`, null);
+export const backupOf = (kind: FileKind) => getSetting<{ content: string; at: number } | null>(scoped(`backup.${kind}`), null);
 
 // ---------------------------------------------------------------- ban policy (profiles.yaml)
 

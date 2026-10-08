@@ -3,7 +3,7 @@ import { ScrollText } from 'lucide-react';
 import { api } from '../api';
 import { Badge, Card, ErrorBox, SkeletonRows, cx, inputBase, useAsync } from '../ui';
 
-interface Entry { id: number; ts: number; username: string | null; action: string; target: string | null; detail: string | null }
+interface Entry { id: number; ts: number; username: string | null; action: string; target: string | null; detail: string | null; instance: string | null }
 
 const tone = (a: string) =>
   a.includes('failed') || a.includes('delete') || a.startsWith('decision.add') ? 'rose'
@@ -12,7 +12,7 @@ const tone = (a: string) =>
 export default function Audit() {
   const { data, error } = useAsync(() => api<Entry[]>('/audit?limit=1000'), [], 30_000);
   const [q, setQ] = useState('');
-  const rows = (data ?? []).filter((e) => !q || `${e.username} ${e.action} ${e.target} ${e.detail}`.toLowerCase().includes(q.toLowerCase()));
+  const rows = (data ?? []).filter((e) => !q || `${e.username} ${e.action} ${e.target} ${e.detail} ${e.instance ?? ''}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="space-y-7">
       <div>
@@ -33,7 +33,7 @@ export default function Audit() {
               <tr key={e.id} className="border-b border-white/[0.03]">
                 <td className="py-2 pr-4 whitespace-nowrap text-slate-400">{new Date(e.ts).toLocaleString()}</td>
                 <td className="pr-4 text-slate-200">{e.username ?? '—'}</td>
-                <td className="pr-4"><Badge tone={tone(e.action) as any}>{e.action}</Badge></td>
+                <td className="pr-4"><Badge tone={tone(e.action) as any}>{e.action}</Badge>{e.instance && <span className="ml-1.5 text-[11px] text-slate-500">on {e.instance}</span>}</td>
                 <td className="max-w-[220px] truncate pr-4 font-mono text-xs text-slate-300">{e.target}</td>
                 <td className="max-w-[420px] truncate font-mono text-xs text-slate-500" title={e.detail ?? ''}>{e.detail}</td>
               </tr>

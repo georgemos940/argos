@@ -30,6 +30,7 @@
 - **Ignore rules**: requests that never count toward a ban (health checks, your app's API, a monitor), by path, host, user agent, method or status
 - **Bouncer usage**: what each bouncer dropped, per decision source
 - **API tokens** for scripts, and installable as an app (PWA)
+- **Several CrowdSec servers** in one Argos: switch between them at the top; alerts from all of them reach your channels, blocklists go to all of them
 - **Single sign-on** with any OpenID Connect provider (Authentik, Keycloak, Authelia, Pocket ID, Google, Entra ID…): link accounts or create them on first sign-in, roles from the provider's groups
 - **Passkeys**: sign in with a fingerprint, face or device PIN; a passkey also counts as the second factor when 2FA is required
 - **Web firewall**: CrowdSec AppSec metrics, blocked requests and the rules that fired
@@ -135,6 +136,16 @@ Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
 | `TRUST_PROXY` | `false` | `true` behind a reverse proxy, so login rate limits and the audit log see the real client IP from `X-Real-IP` / `X-Forwarded-For`. Leave `false` when the panel is reached directly, or anyone can fake their address |
 
 API keys for CrowdSec CTI and AbuseIPDB, the Discord webhooks and blocklists are set in the UI.
+
+## More than one CrowdSec
+
+The server in the environment is the main one. Add others in **Settings → CrowdSec instances**:
+
+1. on that server, a machine for Argos: `docker exec crowdsec cscli machines add argos --password "$PW" -f /dev/null`
+2. optionally its own `argos-docker-proxy` (the same service as in `docker-compose.yml`, with a `PROXY_TOKEN`), for cscli, the hub, ban policy and ignore rules there. Without it you still get alerts, bans and allowlists through the LAPI
+3. the LAPI URL, machine name and password, and the proxy URL and token in Argos. **Test connection** checks both
+
+Reach other servers over a VPN (Tailscale, WireGuard) or HTTPS, not plain HTTP across the internet: the LAPI password and the proxy token travel with every request. Alerts from every instance reach your notification channels with the instance name on them, and blocklists are pushed to all of them. The daily / weekly summary covers the main instance.
 
 ## Single sign-on
 

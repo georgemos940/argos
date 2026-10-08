@@ -33,6 +33,7 @@ import {
 import { reputation, type RepMode } from './reputation.js';
 import { mountDemo } from './demo.js';
 import { findSuspects } from './falsepos.js';
+import { MAIN, current, extraInstances, inInstance, instanceById, listInstances, onMain, pickInstance, removeInstance, saveInstance, scoped, type Instance } from './instances.js';
 import { verifyAssertion, verifyRegistration } from './webauthn.js';
 import { discover, finishSignIn, resolveUser, ssoReady, ssoSettings, startSignIn, type SsoSettings } from './sso.js';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -95,6 +96,8 @@ app.use('/api/*', async (c, next) => {
   return next();
 });
 
+app.use('/api/*', pickInstance);
+
 if (config.demo) mountDemo(app);
 
 // ---------------------------------------------------------------- auth
@@ -111,7 +114,9 @@ app.get('/api/auth/me', (c) => {
     passkeys: !!s && hasPasskey(s.user.id),
     ssoLinked: !!s && !!(db.prepare('SELECT oidc_sub FROM users WHERE id = ?').get(s.user.id) as any)?.oidc_sub,
     sso: ssoReady() ? { label: ssoSettings().label } : null,
-    instance: config.instanceName,
+    instance: current().name,
+    instanceId: current().id,
+    instances: s ? listInstances().map((i) => ({ id: i.id, name: i.name })) : [],
     home: [config.homeLon, config.homeLat],
   });
 });
@@ -393,7 +398,8 @@ app.get('/api/nav', viewer, async (c) => {
 
 app.get('/api/stream', viewer, (c) =>
   streamSSE(c, async (stream) => {
-    const off = onAlert((a) => { stream.writeSSE({ event: 'alert', data: JSON.stringify(a) }); });
+    const mine = current().id;
+    const off = onAlert((a, inst) => { if (inst === mine) stream.writeSSE({ event: 'alert', data: JSON.stringify(a) }); });
     stream.onAbort(() => { off(); });
     while (!stream.aborted) {
       await stream.writeSSE({ event: 'ping', data: String(Date.now()) });
@@ -610,8 +616,8 @@ app.post('/api/explain', operator, async (c) => {
 app.get('/api/console', admin, async (c) => c.json(await cscli(['console', 'status']).catch((e) => ({ error: e.message }))));
 app.post('/api/console/enroll', admin, async (c) => {
   const { key, name } = await c.req.json();
-  await cscli(['console', 'enroll', String(key).trim(), '--name', String(name || config.instanceName)], false);
-  audit(who(c), 'console.enroll', String(name || config.instanceName));
+  await cscli(['console', 'enroll', String(key).trim(), '--name', String(name || current().name)], false);
+  audit(who(c), 'console.enroll', String(name || current().name));
   return c.json(await restartAndWait());
 });
 app.post('/api/console/option', admin, async (c) => {
@@ -669,7 +675,7 @@ const backupInfo = (kind: 'profiles' | 'whitelists') => { const b = backupOf(kin
 app.get('/api/policy', viewer, async (c) => {
   const live = await readCrowdsecFile('profiles');
   const managed = !!live?.startsWith(POLICY_MARK);
-  const policy = managed ? cleanPolicy(getSetting<Policy>('policy', DEFAULT_POLICY)) : guessPolicy(live);
+  const policy = managed ? cleanPolicy(getSetting<Policy>(scoped('policy'), DEFAULT_POLICY)) : guessPolicy(live);
   return c.json({ live, managed, policy, generated: renderPolicy(policy), backup: backupInfo('profiles') });
 });
 app.post('/api/policy/preview', viewer, async (c) => c.json({ generated: renderPolicy(cleanPolicy(await c.req.json())) }));
@@ -680,7 +686,7 @@ app.put('/api/policy', admin, async (c) => {
   const content = raw ? checkContent(body.raw) : renderPolicy(policy!);
   if (raw && !content.trim()) return c.json({ error: 'profiles.yaml cannot be empty' }, 400);
   const r = await applyFile('profiles', content, renderPolicy(DEFAULT_POLICY));
-  if (policy) setSetting('policy', policy);
+  if (policy) setSetting(scoped('policy'), policy);
   audit(who(c), 'policy.apply', raw ? 'raw' : 'form', policy ?? undefined);
   return c.json(r);
 });
@@ -693,14 +699,14 @@ app.post('/api/policy/restore', admin, async (c) => {
 });
 
 app.get('/api/ignore-rules', viewer, async (c) => {
-  const rules = getSetting<IgnoreRule[]>('ignoreRules', []);
+  const rules = getSetting<IgnoreRule[]>(scoped('ignoreRules'), []);
   const live = await readCrowdsecFile('whitelists');
   return c.json({ rules, live, inSync: live === renderRules(rules), backup: backupInfo('whitelists') });
 });
 app.put('/api/ignore-rules', admin, async (c) => {
   const rules = cleanRules((await c.req.json()).rules);
   const r = await applyFile('whitelists', renderRules(rules), EMPTY_RULES);
-  setSetting('ignoreRules', rules);
+  setSetting(scoped('ignoreRules'), rules);
   audit(who(c), 'ignore-rules.apply', `${rules.filter((x) => x.enabled).length} rules`);
   return c.json({ ...r, rules });
 });
@@ -737,7 +743,7 @@ app.post('/api/crowdsec/restart', admin, async (c) => {
 // ---------------------------------------------------------------- cloudflare / traffic
 app.get('/api/cloudflare', viewer, async (c) => {
   if (!cloudflareConfigured()) return c.json({ configured: false, zones: [] });
-  const [zs, rps] = await Promise.all([zones(), config.zoneRpsQuery ? query(config.zoneRpsQuery).catch(() => []) : []]);
+  const [zs, rps] = await Promise.all([zones(), config.zoneRpsQuery ? onMain(() => query(config.zoneRpsQuery)).catch(() => []) : []]);
   const rpsBy = Object.fromEntries(rps.map((s) => [s.metric.zone, s.value]));
   return c.json({ configured: true, zones: zs.map((z) => ({ ...z, rps: rpsBy[z.name] ?? null })) });
 });
@@ -752,7 +758,7 @@ app.post('/api/cloudflare/:id', operator, async (c) => {
 
 app.get('/api/traffic', viewer, async (c) => {
   const [perZone, codes, headroomNow] = await Promise.all([
-    config.zoneRpsQuery ? range(config.zoneRpsQuery, 3600, 30).catch(() => []) : [],
+    config.zoneRpsQuery ? onMain(() => range(config.zoneRpsQuery, 3600, 30)).catch(() => []) : [],
     range('sum by (code) (rate(traefik_entrypoint_requests_total{entrypoint="websecure",code=~"403|429|5.."}[2m]))', 3600, 60).catch(() => []),
     scalar('100 - avg(rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100'),
   ]);
@@ -881,6 +887,78 @@ app.post('/api/grafana-relay/test', admin, async (c) => {
   const a = GRAFANA_SAMPLE.alerts[0];
   await relay({ status: resolved ? 'resolved' : 'firing', alerts: [{ ...a, status: resolved ? 'resolved' : 'firing', endsAt: resolved ? new Date().toISOString() : a.endsAt,
     labels: { ...a.labels, alertname: `TEST · ${a.labels.alertname}` } }] });
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------- instances (more crowdsec servers)
+const SECRET = '••••••';
+const publicInstance = (i: Instance) => ({
+  id: i.id, name: i.name, lapiUrl: i.lapiUrl, lapiUser: i.lapiUser, lapiPassword: i.lapiPassword ? SECRET : '',
+  dockerProxyUrl: i.dockerProxyUrl, dockerProxyToken: i.dockerProxyToken ? SECRET : '', container: i.container, promUrl: i.promUrl,
+  main: i.id === MAIN, cscli: !!(i.dockerProxyUrl || i.socket),
+});
+const httpUrl = (v: unknown, what: string, optional = false) => {
+  const s = String(v ?? '').trim().replace(/\/+$/, '');
+  if (!s && optional) return '';
+  try { if (['http:', 'https:'].includes(new URL(s).protocol)) return s; } catch { /* below */ }
+  throw new Error(`${what} must be an http(s) URL`);
+};
+
+function readInstance(b: any, id: string): Instance {
+  const old = extraInstances().find((i) => i.id === id);
+  const name = String(b.name ?? '').trim().slice(0, 40);
+  if (!name) throw new Error('name required');
+  const lapiUser = String(b.lapiUser ?? '').trim();
+  if (!/^[\w.@-]{1,64}$/.test(lapiUser)) throw new Error('LAPI machine name: letters, digits, dots, dashes');
+  const keep = (v: unknown, prev?: string) => (typeof v === 'string' && v !== SECRET ? v.trim() : prev ?? '');
+  const lapiPassword = keep(b.lapiPassword, old?.lapiPassword);
+  if (!lapiPassword) throw new Error('LAPI password required');
+  const container = String(b.container ?? 'crowdsec').trim() || 'crowdsec';
+  if (!/^[\w.-]{1,64}$/.test(container)) throw new Error('bad container name');
+  const dockerProxyUrl = httpUrl(b.dockerProxyUrl, 'Docker proxy URL', true);
+  const dockerProxyToken = keep(b.dockerProxyToken, old?.dockerProxyToken);
+  if (dockerProxyUrl && dockerProxyToken.length < 32) throw new Error('the docker proxy token is 32+ characters (PROXY_TOKEN on that server)');
+  // never a socket or auto-registration for a remote one
+  return { id, name, lapiUrl: httpUrl(b.lapiUrl, 'LAPI URL'), lapiUser, lapiPassword, dockerProxyUrl, dockerProxyToken, container, promUrl: httpUrl(b.promUrl, 'Prometheus URL', true) };
+}
+
+async function probe(i: Instance) {
+  return inInstance(i, async () => {
+    const [lapi, docker] = await Promise.all([
+      getAlerts({ limit: 1 }).then(() => 'ok').catch((e: any) => e.message as string),
+      i.dockerProxyUrl || i.socket ? cscli(['bouncers', 'list']).then(() => 'ok').catch((e: any) => e.message as string) : Promise.resolve('not set'),
+    ]);
+    return { lapi, docker };
+  });
+}
+
+app.get('/api/instances', admin, async (c) =>
+  c.json(await Promise.all(listInstances().map(async (i) => ({ ...publicInstance(i), status: await probe(i) })))));
+
+app.post('/api/instances/test', admin, async (c) => {
+  const b = await c.req.json();
+  const id = /^[a-z0-9-]{2,30}$/.test(b.id) ? b.id : 'test';
+  if (id === MAIN) return c.json(await probe(instanceById(MAIN)!));
+  try { return c.json(await probe(readInstance(b, id))); } catch (e: any) { return c.json({ error: e.message }, 400); }
+});
+
+app.put('/api/instances/:id', admin, async (c) => {
+  const id = c.req.param('id');
+  if (id === MAIN) return c.json({ error: 'the main instance comes from the environment' }, 400);
+  if (!/^[a-z0-9-]{2,30}$/.test(id)) return c.json({ error: 'id: 2-30 lowercase letters, digits, dashes' }, 400);
+  let inst: Instance;
+  try { inst = readInstance(await c.req.json(), id); } catch (e: any) { return c.json({ error: e.message }, 400); }
+  if (!extraInstances().some((i) => i.id === id) && extraInstances().length >= 20) return c.json({ error: '20 instances at most' }, 400);
+  saveInstance(inst);
+  audit(who(c), 'instance.save', id, { name: inst.name, lapiUrl: inst.lapiUrl, docker: !!inst.dockerProxyUrl });
+  return c.json({ ok: true });
+});
+
+app.delete('/api/instances/:id', admin, (c) => {
+  const id = c.req.param('id');
+  if (id === MAIN) return c.json({ error: 'the main instance comes from the environment' }, 400);
+  removeInstance(id);
+  audit(who(c), 'instance.delete', id);
   return c.json({ ok: true });
 });
 

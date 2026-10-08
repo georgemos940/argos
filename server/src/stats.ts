@@ -1,11 +1,14 @@
 import { getAlerts, meta, type Alert } from './lapi.js';
+import { current } from './instances.js';
 
-let cache: { at: number; window: string; alerts: Alert[] } | null = null;
+const cache = new Map<string, { at: number; alerts: Alert[] }>();
 
 export async function recentAlerts(window: '24h' | '7d' | '30d'): Promise<Alert[]> {
-  if (cache && cache.window === window && Date.now() - cache.at < 15_000) return cache.alerts;
+  const key = `${current().id}:${window}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < 15_000) return hit.alerts;
   const alerts = await getAlerts({ since: window === '24h' ? '24h' : window === '7d' ? '168h' : '720h', limit: 5000 });
-  cache = { at: Date.now(), window, alerts };
+  cache.set(key, { at: Date.now(), alerts });
   return alerts;
 }
 

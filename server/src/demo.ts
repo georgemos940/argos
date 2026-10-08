@@ -86,7 +86,16 @@ const visitors = [
 ];
 
 const routes: Record<string, (c: any) => unknown> = {
-  '/api/auth/me': () => ({ setup: false, user: { username: 'demo', role: 'admin', totp: true }, needsTotp: false, instance: 'demo', home: [8.68, 50.11], demo: true }),
+  '/api/auth/me': (c) => {
+    const id = c.req.header('x-argos-instance') === 'edge-2' ? 'edge-2' : 'main';
+    return { setup: false, user: { username: 'demo', role: 'admin', totp: true }, needsTotp: false, passkeys: true, home: [8.68, 50.11], demo: true,
+      instance: id === 'main' ? 'demo' : 'edge-fra-2', instanceId: id, instances: [{ id: 'main', name: 'demo' }, { id: 'edge-2', name: 'edge-fra-2' }] };
+  },
+  '/api/instances': () => [
+    { id: 'main', name: 'demo', lapiUrl: 'http://crowdsec:8080', lapiUser: 'argos', lapiPassword: '••••••', dockerProxyUrl: 'http://argos-docker-proxy:2375', dockerProxyToken: '••••••',
+      container: 'crowdsec', promUrl: 'http://prometheus:9090', main: true, cscli: true, status: { lapi: 'ok', docker: 'ok' } },
+    { id: 'edge-2', name: 'edge-fra-2', lapiUrl: 'http://100.64.0.12:8080', lapiUser: 'argos', lapiPassword: '••••••', dockerProxyUrl: 'http://100.64.0.12:2375', dockerProxyToken: '••••••',
+      container: 'crowdsec', promUrl: '', main: false, cscli: true, status: { lapi: 'ok', docker: 'ok' } }],
   '/api/nav': () => ({ alerts: 12, bans: 3, lapiUp: true }),
   '/api/overview': (c) => {
     const window = (c.req.query('window') ?? '24h') as '24h' | '7d' | '30d';

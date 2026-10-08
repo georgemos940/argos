@@ -1,4 +1,5 @@
 import { getAlerts, type Alert } from './lapi.js';
+import { MAIN, inInstance, listInstances, type Instance } from './instances.js';
 import { getSetting, setSetting } from './db.js';
 import { slim } from './stats.js';
 import { alertMessage, broadcast, listChannels, type Message } from './channels.js';
@@ -52,7 +53,7 @@ export const notifySettings = (): NotifySettings => {
   return { ...defaultNotify, ...s, embed: { ...defaultEmbed, ...s.embed } };
 };
 
-type Listener = (alert: ReturnType<typeof slim>) => void;
+type Listener = (alert: ReturnType<typeof slim>, instance: string) => void;
 const listeners = new Set<Listener>();
 export const onAlert = (fn: Listener) => { listeners.add(fn); return () => listeners.delete(fn); };
 
@@ -127,18 +128,19 @@ export async function sendDiscord(s: NotifySettings, alerts: Alert[]): Promise<v
   if (!res.ok) throw new Error(`discord ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }
 
-let lastId = 0;
+const lastIds = new Map<string, number>();
 
-async function poll(): Promise<void> {
+async function poll(inst: Instance): Promise<void> {
+  const key = inst.id === MAIN ? 'notify.lastId' : `notify.lastId@${inst.id}`;
+  const lastId = lastIds.get(inst.id) ?? getSetting<number>(key, 0);
   const alerts = await getAlerts({ since: '5m', limit: 200 });
   const fresh = alerts.filter((a) => a.id > lastId).sort((a, b) => a.id - b.id);
-  if (!fresh.length) return;
-  const first = lastId === 0;
-  lastId = fresh[fresh.length - 1].id;
-  setSetting('notify.lastId', lastId);
-  if (first) return;
+  if (!fresh.length) { lastIds.set(inst.id, lastId); return; }
+  lastIds.set(inst.id, fresh[fresh.length - 1].id);
+  setSetting(key, fresh[fresh.length - 1].id);
+  if (lastId === 0) return;
 
-  for (const a of fresh) for (const l of listeners) l(slim(a));
+  for (const a of fresh) for (const l of listeners) l(slim(a), inst.id);
 
   const s = notifySettings();
   const discord = s.enabled && !!s.webhook;
@@ -154,14 +156,18 @@ async function poll(): Promise<void> {
     if (a.events_count < s.minEvents) return false;
     if (inc && !inc.test(a.scenario)) return false;
     if (exc && exc.test(a.scenario)) return false;
-    const last = lastByIp.get(a.source.value) ?? 0;
+    const last = lastByIp.get(`${inst.id}|${a.source.value}`) ?? 0;
     return now - last >= s.cooldownMinutes * 60_000;
   });
   if (!pick.length || sentThisHour.n >= s.maxPerHour) return;
-  for (const a of pick) lastByIp.set(a.source.value, now);
+  for (const a of pick) lastByIp.set(`${inst.id}|${a.source.value}`, now);
   sentThisHour.n++;
-  if (discord) await sendDiscord(s, pick).catch((e) => console.error('[notifier] discord', e.message));
-  await broadcast('alerts', alertMessage(pick), pick.map(slim));
+  // with more than one crowdsec, say which one
+  const many = listInstances().length > 1;
+  const style = many ? { ...s, embed: { ...s.embed, footer: [s.embed.footer, inst.name].filter(Boolean).join(' · ') } } : s;
+  if (discord) await sendDiscord(style, pick).catch((e) => console.error('[notifier] discord', e.message));
+  const msg = alertMessage(pick);
+  await broadcast('alerts', many ? { ...msg, title: `${msg.title} · ${inst.name}` } : msg, pick.map((a) => ({ ...slim(a), instance: inst.name })));
 }
 
 export async function sendDiscordDigest(msg: Message): Promise<void> {
@@ -181,8 +187,9 @@ export async function sendDiscordDigest(msg: Message): Promise<void> {
 }
 
 export function startNotifier(): void {
-  lastId = getSetting<number>('notify.lastId', 0);
-  const tick = () => poll().catch((e) => console.error('[notifier]', e.message));
+  const tick = async () => {
+    for (const i of listInstances()) await inInstance(i, () => poll(i)).catch((e) => console.error('[notifier]', i.name, e.message));
+  };
   tick();
   setInterval(tick, 10_000);
 }

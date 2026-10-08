@@ -1,5 +1,5 @@
-import { config } from './config.js';
 import { registerMachine } from './cscli.js';
+import { current } from './instances.js';
 
 export interface Decision {
   id: number; type: string; scope: string; value: string; duration: string;
@@ -17,40 +17,47 @@ export interface Alert {
   remediation?: boolean; simulated?: boolean;
 }
 
-let token: { value: string; expires: number } | null = null;
+// one jwt per instance
+const tokens = new Map<string, { value: string; expires: number }>();
 
 // lapi wants a "name/version" user agent, otherwise reports a wrong password
 const UA = { 'User-Agent': 'argos/1.0.0' };
 
-let registered = false;
+const registered = new Set<string>();
 
 async function login(): Promise<string> {
-  const attempt = () => fetch(`${config.lapiUrl}/v1/watchers/login`, {
+  const i = current();
+  const attempt = () => fetch(`${i.lapiUrl}/v1/watchers/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...UA },
-    body: JSON.stringify({ machine_id: config.lapiUser, password: config.lapiPassword, scenarios: [] }),
+    body: JSON.stringify({ machine_id: i.lapiUser, password: i.lapiPassword, scenarios: [] }),
+    signal: AbortSignal.timeout(15_000),
   });
   let res = await attempt();
-  if ((res.status === 401 || res.status === 403) && config.lapiAutoRegister && !registered) {
-    registered = true;
-    console.log(`[lapi] login refused, registering machine ${config.lapiUser} through cscli`);
-    await registerMachine(config.lapiUser, config.lapiPassword);
+  if ((res.status === 401 || res.status === 403) && i.autoRegister && !registered.has(i.id)) {
+    registered.add(i.id);
+    console.log(`[lapi] login refused, registering machine ${i.lapiUser} through cscli`);
+    await registerMachine(i.lapiUser, i.lapiPassword);
     res = await attempt();
   }
   if (!res.ok) throw new Error(`LAPI login ${res.status}`);
   const body = (await res.json()) as { token: string; expire: string };
-  token = { value: body.token, expires: new Date(body.expire).getTime() - 60_000 };
-  return token.value;
+  const t = { value: body.token, expires: new Date(body.expire).getTime() - 60_000 };
+  tokens.set(i.id, t);
+  return t.value;
 }
 
 async function lapi<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
-  const t = token && token.expires > Date.now() ? token.value : await login();
-  const res = await fetch(`${config.lapiUrl}${path}`, {
+  const i = current();
+  const cached = tokens.get(i.id);
+  const t = cached && cached.expires > Date.now() ? cached.value : await login();
+  const res = await fetch(`${i.lapiUrl}${path}`, {
+    signal: AbortSignal.timeout(60_000),
     ...init,
     headers: { 'Content-Type': 'application/json', ...UA, Authorization: `Bearer ${t}`, ...(init.headers ?? {}) },
   });
   if (res.status === 401 && retry) {
-    token = null;
+    tokens.delete(i.id);
     return lapi<T>(path, init, false);
   }
   if (!res.ok) throw new Error(`LAPI ${init.method ?? 'GET'} ${path} -> ${res.status} ${await res.text()}`);

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Activity, Ban, CloudLightning, Crosshair, Globe, Radio, ShieldAlert, Users } from 'lucide-react';
-import { api, type SlimAlert } from '../api';
+import { api, selectedInstance, type SlimAlert } from '../api';
 import WorldMap, { type MapPoint } from '../WorldMap';
 import { Badge, Card, ErrorBox, IpLink, PageHeader, Skeleton, SkeletonList, Stat, ago, countryName, cx, flag, shortScenario, useAsync } from '../ui';
 
@@ -50,7 +50,7 @@ export default function Overview({ home }: { home?: [number, number] }) {
   const [hot, setHot] = useState<{ lat: number; lon: number }[]>([]);
 
   useEffect(() => {
-    const es = new EventSource('/api/stream');
+    const es = new EventSource(`/api/stream${selectedInstance() ? `?instance=${encodeURIComponent(selectedInstance())}` : ''}`);
     es.addEventListener('alert', (e) => {
       const a = JSON.parse((e as MessageEvent).data) as SlimAlert;
       setLive((x) => [a, ...x].slice(0, 40));

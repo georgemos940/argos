@@ -1,4 +1,5 @@
 import { request, type RequestOptions } from 'node:http';
+import { request as requestTls } from 'node:https';
 
 // docker engine api over the unix socket, or over http through the argos docker proxy
 export type DockerTarget = { socketPath: string } | { url: string; token: string };
@@ -77,15 +78,17 @@ export function dockerRequest(target: DockerTarget, method: string, path: string
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { 'Content-Type': type };
     const opts: RequestOptions = { method, path, headers };
+    let tls = false;
     if ('socketPath' in target) opts.socketPath = target.socketPath;
     else {
       const u = new URL(target.url);
+      tls = u.protocol === 'https:';
       opts.host = u.hostname;
-      opts.port = u.port || 80;
+      opts.port = u.port || (tls ? 443 : 80);
       opts.path = u.pathname.replace(/\/$/, '') + path;
       headers.Authorization = `Bearer ${target.token}`;
     }
-    const req = request(opts, (res) => {
+    const req = (tls ? requestTls : request)(opts, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (d) => chunks.push(d));
       res.on('end', () => resolve({ status: res.statusCode ?? 0, data: Buffer.concat(chunks) }));

@@ -1,5 +1,6 @@
 import { getSetting, setSetting, audit } from './db.js';
 import { deleteDecisionsByScenario, pushListDecisions } from './lapi.js';
+import { inInstance, listInstances } from './instances.js';
 import { config } from './config.js';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -174,10 +175,16 @@ export async function refresh(id: string, by = 'scheduler'): Promise<Blocklist> 
   try {
     const { values, skipped } = parse(await download(b), await cloudflare());
     if (values.length > 100_000) throw new Error(`${values.length} entries, the limit is 100000`);
-    // drop the old set first, duration covers one missed refresh
-    await deleteDecisionsByScenario(PREFIX + b.id);
-    if (values.length) await pushListDecisions(PREFIX + b.id, b.name, values, `${b.refreshHours * 2 + 1}h`, b.type);
-    const next = upsert({ id, lastRun: Date.now(), lastCount: values.length, lastSkipped: skipped, lastError: null });
+    // every crowdsec gets the list. drop the old set first, the duration covers one missed refresh
+    const failed: string[] = [];
+    for (const inst of listInstances()) {
+      await inInstance(inst, async () => {
+        await deleteDecisionsByScenario(PREFIX + b.id);
+        if (values.length) await pushListDecisions(PREFIX + b.id, b.name, values, `${b.refreshHours * 2 + 1}h`, b.type);
+      }).catch((e) => failed.push(`${inst.name}: ${e.message}`));
+    }
+    if (failed.length === listInstances().length) throw new Error(failed.join('; '));
+    const next = upsert({ id, lastRun: Date.now(), lastCount: values.length, lastSkipped: skipped, lastError: failed.length ? failed.join('; ') : null });
     if (by !== 'scheduler') audit(by, 'blocklist.refresh', id, { count: values.length, skipped });
     return next;
   } catch (e: any) {
@@ -189,7 +196,7 @@ export async function refresh(id: string, by = 'scheduler'): Promise<Blocklist> 
 }
 
 export async function disable(id: string): Promise<void> {
-  await deleteDecisionsByScenario(PREFIX + id);
+  for (const inst of listInstances()) await inInstance(inst, () => deleteDecisionsByScenario(PREFIX + id));
   upsert({ id, enabled: false, lastCount: 0 });
 }
 

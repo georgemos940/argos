@@ -12,6 +12,7 @@ Versions follow [semver](https://semver.org). Docker images are tagged with the 
 - Bouncer usage: dropped packets and bytes per bouncer and decision source
 - Installable as an app (PWA), opens offline to the last shell
 - False positives page: bans that look like real visitors or the app itself, with the reasons and allow / unban / ignore rule in one click
+- Several CrowdSec servers in one Argos: instance switcher, per-instance cscli through each server's docker proxy, alerts from all of them to the channels, blocklists to all of them, audit log says where
 - Single sign-on over OpenID Connect: account linking or creation on first sign-in, email domain limits, roles from a groups claim
 - Passkeys (WebAuthn): add them in Settings, sign in without a password; they satisfy Require 2FA. `PUBLIC_URL` pins the origin they are bound to
 - API tokens (viewer or operator, with expiry) for scripts: `Authorization: Bearer argos_…`

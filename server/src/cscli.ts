@@ -1,17 +1,21 @@
-import { config } from './config.js';
+import { current } from './instances.js';
 import { CONFIG_TEST, isAllowed } from './argv.js';
 import { dockerRequest, readContainerFile, writeContainerFile, type DockerTarget, type FileKind } from './docker.js';
 
 export { isAllowed } from './argv.js';
 
-// straight on the socket, or through the argos docker proxy when DOCKER_PROXY_URL is set
-const target: DockerTarget = config.dockerProxyUrl
-  ? { url: config.dockerProxyUrl, token: config.dockerProxyToken }
-  : { socketPath: config.dockerSocket };
-const docker = (method: string, path: string, body?: unknown) => dockerRequest(target, method, path, body);
+// the current instance's argos docker proxy, or the socket for main when it has no proxy
+function target(): DockerTarget {
+  const i = current();
+  if (i.dockerProxyUrl) return { url: i.dockerProxyUrl, token: i.dockerProxyToken };
+  if (i.socket) return { socketPath: i.socket };
+  throw new Error(`${i.name} has no docker proxy set, so cscli, the hub and config files are off for it`);
+}
+const docker = (method: string, path: string, body?: unknown) => dockerRequest(target(), method, path, body);
+const container = () => current().container;
 
 export async function restartCrowdsec(): Promise<void> {
-  const r = await docker('POST', `/containers/${config.crowdsecContainer}/restart?t=20`);
+  const r = await docker('POST', `/containers/${container()}/restart?t=20`);
   if (r.status !== 204) throw new Error(`docker restart ${r.status}: ${r.data}`);
 }
 
@@ -21,7 +25,8 @@ const why = (r: { status: number; data: Buffer }) => {
 
 // argos' own files in the crowdsec config: profiles.yaml and its whitelist parser
 export async function readCrowdsecFile(kind: FileKind): Promise<string | null> {
-  if ('socketPath' in target) return readContainerFile(target, config.crowdsecContainer, kind);
+  const t = target();
+  if ('socketPath' in t) return readContainerFile(t, container(), kind);
   const r = await docker('GET', `/argos/files/${kind}`);
   if (r.status === 404) return null;
   if (r.status !== 200) throw new Error(`read ${kind}: ${why(r)}`);
@@ -29,7 +34,8 @@ export async function readCrowdsecFile(kind: FileKind): Promise<string | null> {
 }
 
 export async function writeCrowdsecFile(kind: FileKind, content: string): Promise<void> {
-  if ('socketPath' in target) return writeContainerFile(target, config.crowdsecContainer, kind, content);
+  const t = target();
+  if ('socketPath' in t) return writeContainerFile(t, container(), kind, content);
   const r = await docker('PUT', `/argos/files/${kind}`, { content });
   if (r.status !== 200) throw new Error(`write ${kind}: ${why(r)}`);
 }
@@ -95,7 +101,7 @@ export async function simulationStatus(): Promise<Simulation> {
 }
 
 async function exec(cmd: string[], json: boolean): Promise<any> {
-  const created = await docker('POST', `/containers/${config.crowdsecContainer}/exec`, {
+  const created = await docker('POST', `/containers/${container()}/exec`, {
     AttachStdout: true, AttachStderr: true, Tty: true, Cmd: cmd,
   });
   if (created.status !== 201) throw new Error(`docker exec create ${created.status}: ${created.data}`);
