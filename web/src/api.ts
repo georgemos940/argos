@@ -25,6 +25,8 @@ export interface Me {
   needsTotp: boolean;
   mustEnroll?: boolean;
   passkeys?: boolean;
+  ssoLinked?: boolean;
+  sso?: { label: string } | null;
   instance: string;
   home?: [number, number];
   demo?: boolean;

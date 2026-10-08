@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Fingerprint, KeyRound, ShieldCheck } from 'lucide-react';
+import { Fingerprint, KeyRound, LogIn, ShieldCheck } from 'lucide-react';
 import { api, type Me } from '../api';
 import { Button, ErrorBox, Field, inputCls } from '../ui';
 import { addPasskey, deviceName, passkeysSupported, signInWithPasskey } from '../passkey';
@@ -10,8 +10,10 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [token, setToken] = useState('');
   const [code, setCode] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  // a failed sso sign-in comes back as ?sso_error=
+  const [error, setError] = useState<string | null>(() => new URLSearchParams(location.search).get('sso_error'));
   const [busy, setBusy] = useState(false);
+  useEffect(() => { if (location.search.includes('sso_error')) history.replaceState(null, '', location.pathname); }, []);
   const mode = me.setup ? 'setup' : me.needsTotp ? 'totp' : me.mustEnroll ? 'enroll' : 'login';
   const [enroll, setEnroll] = useState<{ secret: string; uri: string } | null>(null);
   const [qr, setQr] = useState('');
@@ -53,6 +55,7 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
     }
   };
   const showPasskey = passkeysSupported() && mode !== 'setup';
+  const showSso = !!me.sso && mode === 'login';
 
   return (
     <div className="grid min-h-full place-items-center p-6">
@@ -102,12 +105,19 @@ export default function Login({ me, onDone }: { me: Me; onDone: () => void }) {
             {mode === 'setup' ? 'Create admin' : mode === 'totp' ? 'Verify' : mode === 'enroll' ? 'Turn on 2FA' : 'Sign in'}
           </Button>
         </form>
-        {showPasskey && (
-          <div className="mt-4 space-y-4">
+        {(showPasskey || showSso) && (
+          <div className="mt-4 space-y-3">
             <div className="flex items-center gap-3 text-[11px] tracking-[0.2em] text-slate-600 uppercase"><span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" /></div>
-            <Button className="w-full" disabled={busy} onClick={passkey}>
-              <Fingerprint size={16} /> {mode === 'enroll' ? 'Add a passkey instead' : mode === 'totp' ? 'Use a passkey instead' : 'Sign in with a passkey'}
-            </Button>
+            {showSso && (
+              <a href="/api/auth/sso/start" className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-white/[0.05] text-sm font-medium text-slate-100 ring-1 ring-white/10 transition hover:bg-white/[0.09] hover:ring-white/20">
+                <LogIn size={16} /> Sign in with {me.sso!.label}
+              </a>
+            )}
+            {showPasskey && (
+              <Button className="w-full" disabled={busy} onClick={passkey}>
+                <Fingerprint size={16} /> {mode === 'enroll' ? 'Add a passkey instead' : mode === 'totp' ? 'Use a passkey instead' : 'Sign in with a passkey'}
+              </Button>
+            )}
           </div>
         )}
       </div>

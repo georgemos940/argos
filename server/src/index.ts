@@ -34,6 +34,8 @@ import { reputation, type RepMode } from './reputation.js';
 import { mountDemo } from './demo.js';
 import { findSuspects } from './falsepos.js';
 import { verifyAssertion, verifyRegistration } from './webauthn.js';
+import { discover, finishSignIn, resolveUser, ssoReady, ssoSettings, startSignIn, type SsoSettings } from './sso.js';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { challengeOf, hasPasskey, newChallenge, passkeyById, passkeysOf, publicOrigin, rpId, takeChallenge } from './passkeys.js';
 import {
   digestMessage, digestSettings, publicChannels, removeChannel, saveChannel, send as sendToChannel, sendDigest, startDigest,
@@ -107,6 +109,8 @@ app.get('/api/auth/me', (c) => {
     needsTotp: !!s && !!s.user.totp_secret && !s.totpOk,
     mustEnroll: !!s && mustEnroll(s),
     passkeys: !!s && hasPasskey(s.user.id),
+    ssoLinked: !!s && !!(db.prepare('SELECT oidc_sub FROM users WHERE id = ?').get(s.user.id) as any)?.oidc_sub,
+    sso: ssoReady() ? { label: ssoSettings().label } : null,
     instance: config.instanceName,
     home: [config.homeLon, config.homeLat],
   });
@@ -263,6 +267,97 @@ app.post('/api/auth/passkey/login', async (c) => {
   createSession(c, cred.user_id, true, 'passkey');
   audit(u.username, 'login', ip(c), { method: 'passkey' });
   return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------- sso (openid connect)
+// lax, not strict: it has to come back on the redirect from the provider
+const SSO_COOKIE = config.cookieSecure ? '__Secure-argos_sso' : 'argos_sso';
+const ssoCallback = (c: any) => `${publicOrigin(c)}/api/auth/sso/callback`;
+const ssoBack = (c: any, err?: string, to = '/') => {
+  deleteCookie(c, SSO_COOKIE, { path: '/api/auth/sso', secure: config.cookieSecure });
+  return c.redirect(err ? `/?sso_error=${encodeURIComponent(err.slice(0, 200))}` : to);
+};
+
+app.get('/api/auth/sso/start', async (c) => {
+  const s = ssoSettings();
+  if (!ssoReady(s)) return ssoBack(c, 'SSO is not set up');
+  let link: number | undefined;
+  if (c.req.query('link')) {
+    const sess = sessionFor(c);
+    if (!sess || (sess.user.totp_secret && !sess.totpOk)) return ssoBack(c, 'sign in first to link SSO');
+    link = sess.user.id;
+  }
+  try {
+    const { url, state } = await startSignIn(s, ssoCallback(c), link);
+    setCookie(c, SSO_COOKIE, state, { httpOnly: true, secure: config.cookieSecure, sameSite: 'Lax', path: '/api/auth/sso', maxAge: 600 });
+    return c.redirect(url);
+  } catch (e: any) {
+    return ssoBack(c, `SSO provider unreachable: ${e.message}`);
+  }
+});
+
+app.get('/api/auth/sso/callback', async (c) => {
+  const s = ssoSettings();
+  if (!ssoReady(s)) return ssoBack(c, 'SSO is not set up');
+  if (tooManyFailures(ip(c))) return ssoBack(c, 'too many attempts, try again in 15 minutes');
+  try {
+    const { claims, linkUserId } = await finishSignIn(s, ssoCallback(c), c.req.query(), getCookie(c, SSO_COOKIE));
+    const u = resolveUser(s, claims, linkUserId);
+    if (linkUserId) {
+      audit(u.username, 'sso.link', String(claims.email ?? claims.sub));
+      return ssoBack(c, undefined, '/settings');
+    }
+    createSession(c, u.id, true, 'sso');
+    audit(u.username, u.created ? 'sso.account-created' : 'login', ip(c), { method: 'sso', email: claims.email });
+    return ssoBack(c);
+  } catch (e: any) {
+    recordFailure(ip(c));
+    audit(null, 'login.failed', ip(c), { sso: e.message });
+    return ssoBack(c, e.message);
+  }
+});
+
+app.post('/api/auth/sso/unlink', enrolling, (c) => {
+  db.prepare('UPDATE users SET oidc_sub = NULL WHERE id = ?').run(c.get('user').id);
+  audit(who(c), 'sso.unlink');
+  return c.json({ ok: true });
+});
+
+const MASK = '••••••';
+app.get('/api/sso', admin, (c) => {
+  const s = ssoSettings();
+  return c.json({ ...s, clientSecret: s.clientSecret ? MASK : '', redirectUri: ssoCallback(c) });
+});
+app.put('/api/sso', admin, async (c) => {
+  const b = await c.req.json();
+  const cur = ssoSettings();
+  const str = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max);
+  const issuer = str(b.issuer, 300).replace(/\/+$/, '');
+  if (issuer && !/^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(issuer)) return c.json({ error: 'issuer must be an https URL' }, 400);
+  const next: SsoSettings = {
+    enabled: !!b.enabled, issuer, clientId: str(b.clientId, 200),
+    clientSecret: typeof b.clientSecret === 'string' && b.clientSecret !== MASK ? b.clientSecret.trim().slice(0, 500) : cur.clientSecret,
+    label: str(b.label, 40) || 'SSO', allowedDomains: str(b.allowedDomains, 500), autoCreate: !!b.autoCreate,
+    defaultRole: ['viewer', 'operator', 'admin'].includes(b.defaultRole) ? b.defaultRole : 'viewer',
+    groupsClaim: /^[\w.:/-]{0,64}$/.test(str(b.groupsClaim, 64)) ? str(b.groupsClaim, 64) : '',
+    adminGroup: str(b.adminGroup, 100), operatorGroup: str(b.operatorGroup, 100), viewerGroup: str(b.viewerGroup, 100),
+  };
+  if (next.enabled) {
+    if (!next.issuer || !next.clientId) return c.json({ error: 'issuer and client ID are needed to turn SSO on' }, 400);
+    try { await discover(next.issuer); } catch (e: any) { return c.json({ error: `discovery failed: ${e.message}` }, 400); }
+  }
+  setSetting('sso', next);
+  audit(who(c), 'sso.update', undefined, { enabled: next.enabled, issuer: next.issuer, autoCreate: next.autoCreate, groupsClaim: next.groupsClaim });
+  return c.json({ ok: true });
+});
+app.post('/api/sso/test', admin, async (c) => {
+  const { issuer } = await c.req.json();
+  try {
+    const d = await discover(String(issuer ?? '').trim());
+    return c.json({ ok: true, issuer: d.issuer, authorization: d.authorization_endpoint });
+  } catch (e: any) {
+    return c.json({ error: `discovery failed: ${e.message}` }, 400);
+  }
 });
 
 // ---------------------------------------------------------------- overview
@@ -811,7 +906,7 @@ app.put('/api/settings', admin, async (c) => {
 });
 
 app.get('/api/users', admin, (c) =>
-  c.json(db.prepare('SELECT id, username, role, totp_secret IS NOT NULL AS totp, (SELECT COUNT(*) FROM passkeys p WHERE p.user_id = users.id) AS passkeys, created_at FROM users ORDER BY id').all()));
+  c.json(db.prepare('SELECT id, username, role, totp_secret IS NOT NULL AS totp, (SELECT COUNT(*) FROM passkeys p WHERE p.user_id = users.id) AS passkeys, oidc_sub IS NOT NULL AS sso, email, created_at FROM users ORDER BY id').all()));
 app.post('/api/users', admin, async (c) => {
   const { username, password, role } = await c.req.json();
   if (!/^[\w.-]{3,32}$/.test(username) || String(password).length < 10 || !['admin', 'operator', 'viewer'].includes(role))
@@ -822,7 +917,7 @@ app.post('/api/users', admin, async (c) => {
   return c.json({ ok: true });
 });
 app.patch('/api/users/:id', admin, async (c) => {
-  const { role, resetTotp } = await c.req.json();
+  const { role, resetTotp, unlinkSso } = await c.req.json();
   const id = Number(c.req.param('id'));
   const admins = (db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'admin'").get() as { n: number }).n;
   const target = db.prepare('SELECT role FROM users WHERE id = ?').get(id) as { role: string } | undefined;
@@ -830,7 +925,8 @@ app.patch('/api/users/:id', admin, async (c) => {
   if (role && role !== 'admin' && target.role === 'admin' && admins <= 1) return c.json({ error: 'cannot demote the last admin' }, 400);
   if (role && ['admin', 'operator', 'viewer'].includes(role)) db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
   if (resetTotp) { db.prepare('UPDATE users SET totp_secret = NULL WHERE id = ?').run(id); endOtherSessions(id); }
-  audit(who(c), 'user.update', String(id), { role, resetTotp });
+  if (unlinkSso) db.prepare('UPDATE users SET oidc_sub = NULL WHERE id = ?').run(id);
+  audit(who(c), 'user.update', String(id), { role, resetTotp, unlinkSso });
   return c.json({ ok: true });
 });
 app.delete('/api/users/:id', admin, (c) => {

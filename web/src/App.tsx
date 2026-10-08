@@ -4,7 +4,7 @@ import {
   Activity, Ban, Bell, BookOpen, Download, ScanSearch, ExternalLink, EyeOff, Flame, Gavel, LayoutDashboard, LayoutGrid, ListChecks, ListX, LogOut, Menu, PanelLeftClose, PanelLeftOpen, ScrollText, Search, Server, Settings as Cog, ShieldCheck, Wrench,
 } from 'lucide-react';
 import { api, type Me } from './api';
-import { AskHost, cx } from './ui';
+import { AskHost, cx, toast } from './ui';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import Alerts from './pages/Alerts';
@@ -261,6 +261,13 @@ export default function App() {
     window.addEventListener('argos:signed-out', h);
     return () => window.removeEventListener('argos:signed-out', h);
   }, [load]);
+
+  // linking sso from settings comes back here when it fails
+  const signedIn = !!me?.user;
+  useEffect(() => {
+    const err = new URLSearchParams(window.location.search).get('sso_error');
+    if (signedIn && err) { toast(err, 'err'); window.history.replaceState(null, '', window.location.pathname); }
+  }, [signedIn]);
 
   if (!me) return <div className="grid h-full place-items-center text-slate-500">Loading…</div>;
   if (!me.user || me.needsTotp || me.setup || me.mustEnroll) return <><Login me={me} onDone={load} /><Toasts /><AskHost /></>;

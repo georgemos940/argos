@@ -30,6 +30,7 @@
 - **Ignore rules**: requests that never count toward a ban (health checks, your app's API, a monitor), by path, host, user agent, method or status
 - **Bouncer usage**: what each bouncer dropped, per decision source
 - **API tokens** for scripts, and installable as an app (PWA)
+- **Single sign-on** with any OpenID Connect provider (Authentik, Keycloak, Authelia, Pocket ID, Google, Entra ID…): link accounts or create them on first sign-in, roles from the provider's groups
 - **Passkeys**: sign in with a fingerprint, face or device PIN; a passkey also counts as the second factor when 2FA is required
 - **Web firewall**: CrowdSec AppSec metrics, blocked requests and the rules that fired
 - **Hub store**: browse and install collections, scenarios, parsers and AppSec rules; upgrade everything with a dry-run preview; CrowdSec restarts on its own
@@ -134,6 +135,16 @@ Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
 | `TRUST_PROXY` | `false` | `true` behind a reverse proxy, so login rate limits and the audit log see the real client IP from `X-Real-IP` / `X-Forwarded-For`. Leave `false` when the panel is reached directly, or anyone can fake their address |
 
 API keys for CrowdSec CTI and AbuseIPDB, the Discord webhooks and blocklists are set in the UI.
+
+## Single sign-on
+
+**Settings → Single sign-on**: the issuer URL, a client ID and secret from your provider, and the redirect URI shown there registered at the provider (`https://<argos>/api/auth/sso/callback`, so set `PUBLIC_URL`). Then either
+
+- link existing accounts: each user signs in with their password once and presses **Link** in Settings, or
+- let people in on first sign-in as viewer or operator, limited to your email domains, or
+- set a groups claim and the admin / operator / viewer groups, and the provider decides the role on every sign-in.
+
+Authorization code with PKCE, the ID token signature is checked against the provider's keys, and the sign-in has to finish in the browser that started it. An SSO sign-in counts as two-factor, so enforce MFA at the provider.
 
 ## API
 

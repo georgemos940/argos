@@ -164,6 +164,10 @@ const routes: Record<string, (c: any) => unknown> = {
     { origin: 'cscli', label: 'Manual and Argos', bytes: 40120, packets: 883, active: 6349 },
   ] }] }),
   '/api/false-positives': () => findSuspects([...visitors, ...alerts], { active: new Map(visitors.map((v) => [v.source.value, { id: v.decisions![0].id, type: 'ban', duration: '3h12m4s' }])) }),
+  '/api/auth/passkeys': () => [{ id: 'demo', name: 'Mac · Safari', created_at: now() - 12 * 86400_000, last_used_at: now() - 3600_000 }],
+  '/api/sso': () => ({ enabled: true, issuer: 'https://auth.example.com/application/o/argos/', clientId: 'argos', clientSecret: '••••••', label: 'Authentik',
+    allowedDomains: 'example.com', autoCreate: true, defaultRole: 'viewer', groupsClaim: 'groups', adminGroup: 'argos-admins', operatorGroup: 'soc', viewerGroup: '',
+    redirectUri: 'https://argos.example.com/api/auth/sso/callback' }),
   '/api/tokens': () => [
     { id: 2, name: 'home-assistant', prefix: 'argos_Qm3xT', role: 'viewer', created_by: 'demo', created_at: now() - 20 * 86400_000, expires_at: now() + 70 * 86400_000, last_used_at: now() - 90_000, last_ip: '192.168.1.20' },
     { id: 1, name: 'fail2ban-bridge', prefix: 'argos_9Kd2w', role: 'operator', created_by: 'demo', created_at: now() - 60 * 86400_000, expires_at: null, last_used_at: now() - 3 * 3600_000, last_ip: '10.0.0.4' }],

@@ -63,6 +63,8 @@ db.exec(`
 // columns added after the first release
 const hasColumn = (table: string, col: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((r) => r.name === col);
 if (!hasColumn('sessions', 'method')) db.exec("ALTER TABLE sessions ADD COLUMN method TEXT NOT NULL DEFAULT 'password'");
+if (!hasColumn('users', 'oidc_sub')) db.exec('ALTER TABLE users ADD COLUMN oidc_sub TEXT; ALTER TABLE users ADD COLUMN email TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_oidc_sub ON users(oidc_sub) WHERE oidc_sub IS NOT NULL');
 db.exec('PRAGMA foreign_keys = ON');
 
 export function getSetting<T>(key: string, fallback: T): T {

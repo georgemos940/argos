@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Check, Copy, Fingerprint, KeyRound, KeySquare, Plus, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { Check, Copy, Fingerprint, KeyRound, KeySquare, LogIn, Plus, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
 import { addPasskey, deviceName, passkeysSupported } from '../passkey';
 import { api, type Me } from '../api';
 import { can } from '../App';
@@ -19,8 +19,10 @@ export default function Settings({ me, reload }: { me: Me; reload: () => void })
         <Password />
         <TwoFactor enabled={me.user!.totp} reload={reload} />
         <Passkeys reload={reload} />
+        {me.sso && <SsoLink me={me} reload={reload} />}
         {admin && <UsersCard me={me.user!.username} />}
         {admin && <Tokens />}
+        {admin && <SsoSetup />}
         {admin && <Integrations />}
       </div>
     </div>
@@ -131,7 +133,7 @@ function Passkeys({ reload: reloadMe }: { reload: () => void }) {
 }
 
 function UsersCard({ me }: { me: string }) {
-  const { data, reload } = useAsync(() => api<{ id: number; username: string; role: string; totp: number; passkeys: number; created_at: number }[]>('/users'), []);
+  const { data, reload } = useAsync(() => api<{ id: number; username: string; role: string; totp: number; passkeys: number; sso: number; email: string | null; created_at: number }[]>('/users'), []);
   const sec = useAsync(() => api<{ require2fa: boolean }>('/settings'), []);
   const setRequire2fa = async (v: boolean) => {
     try { await api('/settings', { method: 'PUT', json: { require2fa: v } }); toast(v ? '2FA is now required for everyone' : '2FA is optional again'); sec.reload(); }
@@ -161,7 +163,8 @@ function UsersCard({ me }: { me: string }) {
           <li key={u.id} className="flex items-center justify-between gap-3 py-2.5">
             <div>
               <div className="flex items-center gap-2 text-sm text-white">{u.username}{u.totp ? <ShieldCheck size={13} className="text-emerald-400" /> : null}
-                {u.passkeys ? <span title={`${u.passkeys} passkey${u.passkeys > 1 ? 's' : ''}`}><Fingerprint size={13} className="text-cyan-300" /></span> : null}</div>
+                {u.passkeys ? <span title={`${u.passkeys} passkey${u.passkeys > 1 ? 's' : ''}`}><Fingerprint size={13} className="text-cyan-300" /></span> : null}
+                {u.sso ? <span title={`SSO${u.email ? ` · ${u.email}` : ''}`}><LogIn size={13} className="text-violet-300" /></span> : null}</div>
               <div className="text-xs text-slate-500">added {ago(u.created_at)}</div>
             </div>
             <div className="flex items-center gap-2">
@@ -169,6 +172,7 @@ function UsersCard({ me }: { me: string }) {
                 <option value="viewer">viewer</option><option value="operator">operator</option><option value="admin">admin</option>
               </select>
               {!!u.totp && u.username !== me && <Button tone="ghost" onClick={() => patch(u.id, { resetTotp: true })}>Reset 2FA</Button>}
+              {!!u.sso && u.username !== me && <Button tone="ghost" onClick={() => patch(u.id, { unlinkSso: true })}>Unlink SSO</Button>}
               {u.username !== me && <Button tone="ghost" onClick={() => del(u.id, u.username)}><Trash2 size={14} /></Button>}
             </div>
           </li>
@@ -331,5 +335,88 @@ function NewToken({ open, onClose, onDone }: { open: boolean; onClose: () => voi
         </div>
       )}
     </Modal>
+  );
+}
+
+interface Sso {
+  enabled: boolean; issuer: string; clientId: string; clientSecret: string; label: string; allowedDomains: string; autoCreate: boolean;
+  defaultRole: string; groupsClaim: string; adminGroup: string; operatorGroup: string; viewerGroup: string; redirectUri: string;
+}
+
+function SsoLink({ me, reload }: { me: Me; reload: () => void }) {
+  const unlink = async () => {
+    if (!await ask({ title: 'Unlink SSO?', body: `You will sign in with your password${me.passkeys ? ' or a passkey' : ''} only.`, tone: 'danger', confirmLabel: 'Unlink' })) return;
+    await api('/auth/sso/unlink', { method: 'POST' });
+    toast('SSO unlinked');
+    reload();
+  };
+  return (
+    <Card title="Single sign-on" icon={<LogIn size={16} />}>
+      <p className="mb-4 text-sm text-slate-400">Sign in through {me.sso!.label} instead of a password.</p>
+      {me.ssoLinked
+        ? <div className="flex items-center justify-between"><Badge tone="emerald"><Check size={12} /> linked to {me.sso!.label}</Badge><Button tone="ghost" onClick={unlink}>Unlink</Button></div>
+        : <a href="/api/auth/sso/start?link=1" className="inline-flex items-center gap-2 rounded-xl bg-white/[0.05] px-3.5 py-2 text-sm font-medium text-slate-100 ring-1 ring-white/10 transition hover:bg-white/[0.09]"><LogIn size={15} /> Link my {me.sso!.label} account</a>}
+    </Card>
+  );
+}
+
+function SsoSetup() {
+  const { data, reload } = useAsync(() => api<Sso>('/sso'), []);
+  const [f, setF] = useState<Sso | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { if (data) setF(data); }, [data]);
+  const set = (patch: Partial<Sso>) => setF((x) => (x ? { ...x, ...patch } : x));
+  const save = async () => {
+    setBusy(true); setError(null);
+    try { await api('/sso', { method: 'PUT', json: f }); toast(f!.enabled ? 'SSO is on' : 'SSO saved'); reload(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  const test = async () => {
+    setBusy(true); setError(null);
+    try { const r = await api<{ issuer: string }>('/sso/test', { method: 'POST', json: { issuer: f!.issuer } }); toast(`Found ${r.issuer}`); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  if (!f) return <Card title="Single sign-on (OpenID Connect)" icon={<LogIn size={16} />} className="xl:col-span-2"><SkeletonList rows={3} /></Card>;
+  const input = (k: keyof Sso, label: string, hint?: string, ph?: string, type = 'text') => (
+    <Field label={label} hint={hint}><input type={type} className={inputCls} value={String(f[k] ?? '')} placeholder={ph} onChange={(e) => set({ [k]: e.target.value } as Partial<Sso>)} /></Field>
+  );
+  return (
+    <Card title="Single sign-on (OpenID Connect)" icon={<LogIn size={16} />} className="xl:col-span-2"
+      subtitle="Authentik, Keycloak, Authelia, Pocket ID, Google, Entra ID, Okta… anything with OpenID discovery."
+      actions={<Switch checked={f.enabled} onChange={(v) => set({ enabled: v })} label="SSO" />}>
+      <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl bg-ink-950/50 px-4 py-3 text-xs text-slate-400 ring-1 ring-white/[0.05]">
+        Redirect URI to register at the provider:
+        <code className="font-mono text-cyan-200">{f.redirectUri}</code>
+        <button onClick={() => navigator.clipboard?.writeText(f.redirectUri).then(() => setCopied(true))} className="rounded-md p-1 text-slate-500 hover:text-white">{copied ? <Check size={13} /> : <Copy size={13} />}</button>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {input('issuer', 'Issuer URL', 'Where /.well-known/openid-configuration lives.', 'https://auth.example.com/application/o/argos/')}
+        {input('clientId', 'Client ID')}
+        {input('clientSecret', 'Client secret', undefined, undefined, 'password')}
+        {input('label', 'Button label', 'Sign in with …', 'Authentik')}
+        {input('allowedDomains', 'Allowed email domains', 'Comma separated. Empty lets anyone the provider signs in.', 'example.com')}
+        <Field label="People without an account here">
+          <select className={inputCls} value={f.autoCreate ? f.defaultRole : 'none'} onChange={(e) => set(e.target.value === 'none' ? { autoCreate: false } : { autoCreate: true, defaultRole: e.target.value })}>
+            <option value="none">are refused (link accounts in Settings)</option>
+            <option value="viewer">get an account as viewer</option>
+            <option value="operator">get an account as operator</option>
+          </select>
+        </Field>
+        {input('groupsClaim', 'Groups claim', 'Optional. When set, the provider decides the role on every sign-in.', 'groups')}
+        {input('adminGroup', 'Admin group', undefined, 'argos-admins')}
+        {input('operatorGroup', 'Operator group', undefined, 'argos-operators')}
+        {input('viewerGroup', 'Viewer group', 'Empty: anyone else in is a viewer. Set: only this group.', 'argos-viewers')}
+      </div>
+      <p className="mt-4 text-xs text-slate-500">An SSO sign-in counts as two-factor here; enforce MFA at the provider.</p>
+      <ErrorBox error={error} />
+      <div className="mt-4 flex justify-end gap-2">
+        <Button tone="ghost" disabled={busy || !f.issuer} onClick={test}>Test discovery</Button>
+        <Button tone="primary" disabled={busy} onClick={save}>Save</Button>
+      </div>
+    </Card>
   );
 }
