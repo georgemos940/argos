@@ -10,7 +10,7 @@ import { db, audit, getSetting, setSetting } from './db.js';
 import {
   burnPasswordCheck, checkPassword, checkTotp, clearFailures, clientIp, createSession, destroySession, endOtherSessions,
   hashPassword, markTotpOk, newTotpSecret, recordFailure, require2faForAll, requireRole, sessionFor, tooManyFailures,
-  userCount, type User,
+  userCount, createToken, hasBearer, TOKEN_ROLES, type Role, type User,
 } from './auth.js';
 import { addDecision, deleteDecision, deleteDecisionsFor, getAlert, getAlerts, lapiHealth } from './lapi.js';
 import { recentAlerts, slim, summarize } from './stats.js';
@@ -77,6 +77,8 @@ app.use('/hooks/*', bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ e
 // without a cors preflight, and we answer none
 app.use('/api/*', async (c, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) return next();
+  // an api token is not a cookie, a browser cannot send it cross-site without a preflight
+  if (hasBearer(c)) return next();
   if (c.req.header('x-argos') !== '1') return c.json({ error: 'missing request header' }, 403);
   const origin = c.req.header('origin');
   if (origin) {
@@ -730,6 +732,27 @@ app.delete('/api/users/:id', admin, (c) => {
   endOtherSessions(id);
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
   audit(who(c), 'user.delete', String(id));
+  return c.json({ ok: true });
+});
+
+app.get('/api/tokens', admin, (c) =>
+  c.json(db.prepare('SELECT id, name, prefix, role, created_by, created_at, expires_at, last_used_at, last_ip FROM tokens ORDER BY id DESC').all()));
+app.post('/api/tokens', admin, async (c) => {
+  const { name, role, days } = await c.req.json();
+  const n = String(name ?? '').trim();
+  if (!/^[\w .-]{1,40}$/.test(n)) return c.json({ error: 'name: 1-40 letters, digits, spaces, dots, dashes' }, 400);
+  if (!TOKEN_ROLES.includes(role)) return c.json({ error: 'role: viewer or operator' }, 400);
+  if ((db.prepare('SELECT COUNT(*) n FROM tokens').get() as { n: number }).n >= 50) return c.json({ error: '50 tokens at most' }, 400);
+  const d = Number(days) > 0 ? Math.min(3650, Math.round(Number(days))) : undefined;
+  const token = createToken(n, role as Role, who(c), d);
+  audit(who(c), 'token.create', n, { role, days: d ?? null });
+  return c.json({ token });
+});
+app.delete('/api/tokens/:id', admin, (c) => {
+  const row = db.prepare('SELECT name FROM tokens WHERE id = ?').get(Number(c.req.param('id'))) as { name: string } | undefined;
+  if (!row) return c.json({ error: 'no such token' }, 404);
+  db.prepare('DELETE FROM tokens WHERE id = ?').run(Number(c.req.param('id')));
+  audit(who(c), 'token.revoke', row.name);
   return c.json({ ok: true });
 });
 

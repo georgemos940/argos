@@ -32,6 +32,18 @@ db.exec(`
     target TEXT,
     detail TEXT
   );
+  CREATE TABLE IF NOT EXISTS tokens (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    hash TEXT UNIQUE NOT NULL,
+    role TEXT NOT NULL,
+    created_by TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    last_used_at INTEGER,
+    last_ip TEXT
+  );
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

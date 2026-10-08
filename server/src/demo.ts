@@ -147,6 +147,9 @@ const routes: Record<string, (c: any) => unknown> = {
     { origin: 'CAPI', label: 'Community blocklist', bytes: 91790, packets: 1930, active: 22719 },
     { origin: 'cscli', label: 'Manual and Argos', bytes: 40120, packets: 883, active: 6349 },
   ] }] }),
+  '/api/tokens': () => [
+    { id: 2, name: 'home-assistant', prefix: 'argos_Qm3xT', role: 'viewer', created_by: 'demo', created_at: now() - 20 * 86400_000, expires_at: now() + 70 * 86400_000, last_used_at: now() - 90_000, last_ip: '192.168.1.20' },
+    { id: 1, name: 'fail2ban-bridge', prefix: 'argos_9Kd2w', role: 'operator', created_by: 'demo', created_at: now() - 60 * 86400_000, expires_at: null, last_used_at: now() - 3 * 3600_000, last_ip: '10.0.0.4' }],
   '/api/allowlists': () => [
     { name: 'trusted', description: 'Office and monitoring', created_at: '', updated_at: '', items: [{ value: '198.51.100.10', comment: 'office' }, { value: '203.0.113.0/28', comment: 'uptime monitor' }] },
     { name: 'partners', description: 'Payment and API partners', created_at: '', updated_at: '', items: [{ value: '192.0.2.44', comment: 'payment gateway webhooks' }] }],

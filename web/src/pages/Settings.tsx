@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { KeyRound, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { Check, Copy, KeyRound, KeySquare, Plus, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
 import { api, type Me } from '../api';
 import { can } from '../App';
-import { Badge, Button, Card, ErrorBox, Field, Modal, SkeletonList, Switch, ago, ask, inputCls, toast, useAsync } from '../ui';
+import { Badge, Button, Card, Empty, ErrorBox, Field, Modal, SkeletonList, Switch, ago, ask, inputCls, toast, useAsync } from '../ui';
 
 export default function Settings({ me, reload }: { me: Me; reload: () => void }) {
   const admin = can(me.user!.role, 'admin');
@@ -18,6 +18,7 @@ export default function Settings({ me, reload }: { me: Me; reload: () => void })
         <Password />
         <TwoFactor enabled={me.user!.totp} reload={reload} />
         {admin && <UsersCard me={me.user!.username} />}
+        {admin && <Tokens />}
         {admin && <Integrations />}
       </div>
     </div>
@@ -202,5 +203,94 @@ function Integrations() {
         </Field>
       </div>
     </Card>
+  );
+}
+
+interface Token { id: number; name: string; prefix: string; role: string; created_by: string; created_at: number; expires_at: number | null; last_used_at: number | null; last_ip: string | null }
+
+function Tokens() {
+  const { data, reload } = useAsync(() => api<Token[]>('/tokens'), []);
+  const [open, setOpen] = useState(false);
+  const revoke = async (t: Token) => {
+    if (!await ask({ title: `Revoke ${t.name}?`, body: 'Anything still using this token gets a 401 from now on.', tone: 'danger', confirmLabel: 'Revoke' })) return;
+    await api(`/tokens/${t.id}`, { method: 'DELETE' });
+    toast(`${t.name} revoked`);
+    reload();
+  };
+  return (
+    <Card title="API tokens" icon={<KeySquare size={16} />} actions={<Button onClick={() => setOpen(true)}><Plus size={14} /> New token</Button>}>
+      <p className="mb-3 text-xs text-slate-500">For scripts and other tools: <code className="text-slate-300">Authorization: Bearer argos_…</code> on any <code className="text-slate-300">/api</code> route. Viewer or operator, never admin.</p>
+      {!data && <SkeletonList rows={2} />}
+      {data && !data.length && <Empty>No tokens yet</Empty>}
+      <ul className="divide-y divide-white/5">
+        {(data ?? []).map((t) => {
+          const expired = !!t.expires_at && t.expires_at < Date.now();
+          return (
+            <li key={t.id} className="flex items-center justify-between gap-3 py-2.5">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2 text-sm text-white">
+                  {t.name}<Badge tone={t.role === 'operator' ? 'violet' : 'slate'}>{t.role}</Badge>{expired && <Badge tone="rose">expired</Badge>}
+                </div>
+                <div className="truncate text-xs text-slate-500">
+                  <span className="font-mono">{t.prefix}…</span> · {t.last_used_at ? `used ${ago(t.last_used_at)} from ${t.last_ip}` : 'never used'}
+                  {t.expires_at && !expired && ` · expires in ${Math.ceil((t.expires_at - Date.now()) / 86400_000)}d`}
+                </div>
+              </div>
+              <Button tone="ghost" onClick={() => revoke(t)}><Trash2 size={14} /></Button>
+            </li>
+          );
+        })}
+      </ul>
+      <NewToken open={open} onClose={() => setOpen(false)} onDone={reload} />
+    </Card>
+  );
+}
+
+function NewToken({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+  const [name, setName] = useState('');
+  const [role, setRole] = useState('viewer');
+  const [days, setDays] = useState('90');
+  const [token, setToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const close = () => { setToken(null); setName(''); setError(null); setCopied(false); onClose(); };
+  const create = async () => {
+    try { const r = await api<{ token: string }>('/tokens', { method: 'POST', json: { name, role, days: Number(days) } }); setToken(r.token); onDone(); }
+    catch (e: any) { setError(e.message); }
+  };
+  const copy = () => { navigator.clipboard?.writeText(token!).then(() => setCopied(true)).catch(() => {}); };
+  return (
+    <Modal open={open} onClose={close} title={token ? 'Copy your token' : 'New API token'}>
+      {token ? (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-400">This is the only time it is shown. Argos keeps a hash, not the token.</p>
+          <div className="flex gap-2">
+            <code className="min-w-0 flex-1 rounded-xl bg-ink-950/70 px-3.5 py-2.5 font-mono text-xs break-all text-cyan-200 ring-1 ring-white/10">{token}</code>
+            <Button onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />}</Button>
+          </div>
+          <pre className="scroll-thin overflow-x-auto rounded-xl bg-ink-950/70 p-3 font-mono text-[11px] leading-relaxed text-slate-400 ring-1 ring-white/[0.06]">{`curl -H "Authorization: Bearer ${token}" \\
+  ${location.origin}/api/decisions`}</pre>
+          <div className="flex justify-end"><Button tone="primary" onClick={close}>Done</Button></div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <Field label="Name" hint="What uses it, e.g. home-assistant or nightly-report."><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Role">
+              <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="viewer">viewer (read only)</option><option value="operator">operator (ban, unban)</option>
+              </select>
+            </Field>
+            <Field label="Expires">
+              <select className={inputCls} value={days} onChange={(e) => setDays(e.target.value)}>
+                <option value="30">in 30 days</option><option value="90">in 90 days</option><option value="365">in a year</option><option value="0">never</option>
+              </select>
+            </Field>
+          </div>
+          <ErrorBox error={error} />
+          <div className="flex justify-end"><Button tone="primary" disabled={!name.trim()} onClick={create}>Create</Button></div>
+        </div>
+      )}
+    </Modal>
   );
 }

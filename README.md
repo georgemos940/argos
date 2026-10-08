@@ -28,6 +28,7 @@
 - **Ban policy**: ban length, longer bans for repeat offenders, a captcha before the ban for web attacks, or `profiles.yaml` by hand. CrowdSec checks the file (`crowdsec -t`) before it restarts into it, and a file it refuses or does not come back up with is put back
 - **Ignore rules**: requests that never count toward a ban (health checks, your app's API, a monitor), by path, host, user agent, method or status
 - **Bouncer usage**: what each bouncer dropped, per decision source
+- **API tokens** for scripts, and installable as an app (PWA)
 - **Web firewall**: CrowdSec AppSec metrics, blocked requests and the rules that fired
 - **Hub store**: browse and install collections, scenarios, parsers and AppSec rules; upgrade everything with a dry-run preview; CrowdSec restarts on its own
 - **Simulation mode** per scenario, to try a rule without banning anyone
@@ -130,6 +131,25 @@ Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
 | `TRUST_PROXY` | `false` | `true` behind a reverse proxy, so login rate limits and the audit log see the real client IP from `X-Real-IP` / `X-Forwarded-For`. Leave `false` when the panel is reached directly, or anyone can fake their address |
 
 API keys for CrowdSec CTI and AbuseIPDB, the Discord webhooks and blocklists are set in the UI.
+
+## API
+
+Everything the UI does goes through `/api`, and scripts can use it too. Create a token in **Settings → API tokens** (viewer or operator, with an expiry), then:
+
+```bash
+# active bans
+curl -H "Authorization: Bearer argos_..." https://argos.example.com/api/decisions
+
+# ban an IP for 24h (operator token)
+curl -X POST -H "Authorization: Bearer argos_..." -H "Content-Type: application/json" \
+  -d '{"scope":"Ip","value":"203.0.113.7","duration":"24h","reason":"from my script"}' \
+  https://argos.example.com/api/decisions
+
+# live alerts as server-sent events
+curl -N -H "Authorization: Bearer argos_..." https://argos.example.com/api/stream
+```
+
+Only a hash of the token is stored. Admin actions (users, settings, tokens, ban policy) stay in the browser behind 2FA.
 
 ## Grafana alerts to Discord
 

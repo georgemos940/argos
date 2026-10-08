@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { getConnInfo } from '@hono/node-server/conninfo';
@@ -116,8 +116,43 @@ export function markTotpOk(sid: string): void {
 
 const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
 
+// ---------------------------------------------------------------- api tokens
+// admin stays in the browser behind 2fa, tokens go up to operator
+export const TOKEN_ROLES: Role[] = ['viewer', 'operator'];
+const sha256 = (t: string) => createHash('sha256').update(t).digest('hex');
+
+export function createToken(name: string, role: Role, by: string, days?: number): string {
+  const token = `argos_${randomBytes(32).toString('base64url')}`;
+  db.prepare('INSERT INTO tokens (name, prefix, hash, role, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(name, token.slice(0, 12), sha256(token), role, by, Date.now(), days ? Date.now() + days * 86400_000 : null);
+  return token;
+}
+
+const bearer = (c: Context) => {
+  const h = c.req.header('authorization');
+  return h?.startsWith('Bearer ') ? h.slice(7).trim() : null;
+};
+export const hasBearer = (c: Context) => bearer(c) !== null;
+
+async function tokenAuth(c: Context, next: () => Promise<void>, min: Role, enrolling?: boolean) {
+  if (enrolling || c.req.path.startsWith('/api/auth/')) return c.json({ error: 'not available to api tokens' }, 403);
+  const ip = clientIp(c);
+  if (tooManyFailures(ip)) return c.json({ error: 'too many attempts, try again in 15 minutes' }, 429);
+  const row = db.prepare('SELECT id, name, role, expires_at, last_used_at FROM tokens WHERE hash = ?').get(sha256(bearer(c)!)) as any;
+  if (!row || (row.expires_at && row.expires_at < Date.now())) {
+    recordFailure(ip);
+    return c.json({ error: 'bad or expired token' }, 401);
+  }
+  if (!row.last_used_at || Date.now() - row.last_used_at > 60_000)
+    db.prepare('UPDATE tokens SET last_used_at = ?, last_ip = ? WHERE id = ?').run(Date.now(), ip, row.id);
+  if (RANK[row.role as Role] < RANK[min]) return c.json({ error: 'forbidden for this token' }, 403);
+  c.set('user', { id: 0, username: `token:${row.name}`, role: row.role, totp_secret: null });
+  await next();
+}
+
 // signed in, 2fa passed, role >= min. enrolling is the one thing allowed before 2fa when it is required
 export const requireRole = (min: Role, opts: { enrolling?: boolean } = {}): MiddlewareHandler => async (c, next) => {
+  if (hasBearer(c)) return tokenAuth(c, next, min, opts.enrolling);
   const s = sessionFor(c);
   if (!s) return c.json({ error: 'not signed in' }, 401);
   if (s.user.totp_secret && !s.totpOk) return c.json({ error: '2fa required' }, 401);
