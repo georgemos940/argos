@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { registerMachine } from './cscli.js';
 
 export interface Decision {
   id: number; type: string; scope: string; value: string; duration: string;
@@ -21,12 +22,21 @@ let token: { value: string; expires: number } | null = null;
 // lapi wants a "name/version" user agent, otherwise reports a wrong password
 const UA = { 'User-Agent': 'argos/1.0.0' };
 
+let registered = false;
+
 async function login(): Promise<string> {
-  const res = await fetch(`${config.lapiUrl}/v1/watchers/login`, {
+  const attempt = () => fetch(`${config.lapiUrl}/v1/watchers/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...UA },
     body: JSON.stringify({ machine_id: config.lapiUser, password: config.lapiPassword, scenarios: [] }),
   });
+  let res = await attempt();
+  if ((res.status === 401 || res.status === 403) && config.lapiAutoRegister && !registered) {
+    registered = true;
+    console.log(`[lapi] login refused, registering machine ${config.lapiUser} through cscli`);
+    await registerMachine(config.lapiUser, config.lapiPassword);
+    res = await attempt();
+  }
   if (!res.ok) throw new Error(`LAPI login ${res.status}`);
   const body = (await res.json()) as { token: string; expire: string };
   token = { value: body.token, expires: new Date(body.expire).getTime() - 60_000 };

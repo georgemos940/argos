@@ -49,11 +49,34 @@
   </tr>
 </table>
 
-## Quick start
+## Try it in 10 seconds
+
+No CrowdSec needed: the demo runs on generated data, with attacks arriving live on the map. Nothing can be changed.
+
+```sh
+docker run --rm -p 3000:3000 -e DEMO=1 -e COOKIE_SECURE=false ghcr.io/georgemos940/crowdsec-argos-ui:latest
+```
+
+Open `http://localhost:3000`.
+
+## Starting from zero
+
+[`examples/all-in-one`](examples/all-in-one) runs CrowdSec, Traefik with the CrowdSec bouncer, a test app and Argos together. Argos registers itself with CrowdSec on first start.
+
+```sh
+cd examples/all-in-one
+cp .env.example .env        # three secrets: openssl rand -hex 32
+docker compose up -d
+docker compose logs argos | grep 'Setup token'
+```
+
+The app is on `http://localhost:8080`, Argos on `http://localhost:3000`. Add the `crowdsec@docker` middleware to any other router you want protected.
+
+## Quick start (existing CrowdSec)
 
 CrowdSec must already run in Docker. The panel talks to its Local API as a machine and runs `cscli` inside the CrowdSec container.
 
-**1. Create a machine for the panel**
+**1. Create a machine for the panel** (or set `LAPI_AUTO_REGISTER=true` and skip this)
 
 ```sh
 PW=$(openssl rand -hex 32)
@@ -87,6 +110,8 @@ Open `http://127.0.0.1:3010`, paste the setup token and create the first admin.
 | `SESSION_SECRET` | | required, signs sessions |
 | `LAPI_URL` | `http://crowdsec:8080` | CrowdSec Local API |
 | `LAPI_USER` / `LAPI_PASSWORD` | | the machine from step 1 |
+| `LAPI_AUTO_REGISTER` | `false` | `true` creates that machine through `cscli` when the login is refused (password 16+ chars) |
+| `DEMO` | | `1` runs on generated data, read-only, no CrowdSec needed |
 | `CROWDSEC_CONTAINER` | `crowdsec` | container name for `cscli` and restarts |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | |
 | `DATA_DIR` | `./data` | SQLite database (users, settings, audit) |
@@ -127,6 +152,11 @@ If you do put it on the internet, put it behind HTTPS with `TRUST_PROXY=true`, t
 npm install
 npm run dev:web       # vite on :5173, proxies /api to :3000
 SESSION_SECRET=dev LAPI_USER=... LAPI_PASSWORD=... LAPI_URL=http://localhost:8080 COOKIE_SECURE=false npm run dev:server
+```
+
+```sh
+npm test              # blocklist parser, ssrf guard, roles, cscli allow-list, hub upgrade plan
+DEMO=1 COOKIE_SECURE=false npm start   # after npm run build
 ```
 
 Stack: Node 22, Hono, node:sqlite, React 19, Vite, Tailwind 4, Recharts, d3-geo.

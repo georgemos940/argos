@@ -34,6 +34,8 @@ export const config = {
   instanceName: env('INSTANCE_NAME', 'crowdsec'),
   // behind a reverse proxy: take the client ip from X-Real-IP / X-Forwarded-For, never otherwise
   trustProxy: env('TRUST_PROXY', 'false') === 'true',
+  // create the lapi machine through cscli when the login is refused (fresh installs)
+  lapiAutoRegister: env('LAPI_AUTO_REGISTER', 'false') === 'true',
   // false only for plain http
   cookieSecure: env('COOKIE_SECURE', 'true') !== 'false',
 };

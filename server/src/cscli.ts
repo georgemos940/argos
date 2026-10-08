@@ -83,6 +83,12 @@ export async function explain(log: string, type: string): Promise<string> {
   return out.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
+// first start: add our own lapi machine. -f /dev/null keeps cscli off crowdsec's own credentials file
+export async function registerMachine(user: string, password: string): Promise<void> {
+  if (!/^[\w.-]{1,64}$/.test(user) || !/^[!-~]{16,128}$/.test(password)) throw new Error('LAPI_USER or LAPI_PASSWORD not usable for auto registration (password 16+ chars)');
+  await exec(['cscli', 'machines', 'add', user, '--password', password, '-f', '/dev/null', '--force', '--color', 'no'], false);
+}
+
 export interface Simulation { global: boolean; scenarios: string[] }
 
 export async function simulationStatus(): Promise<Simulation> {

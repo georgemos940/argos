@@ -1,0 +1,91 @@
+# crowdsec + traefik (with the crowdsec bouncer plugin) + a test app + argos
+#   cp .env.example .env   # fill the three secrets
+#   docker compose up -d
+#   docker compose logs argos | grep 'Setup token'
+# app: http://localhost:8080  argos: http://localhost:3000
+
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.7.7
+    container_name: crowdsec
+    restart: unless-stopped
+    environment:
+      COLLECTIONS: crowdsecurity/traefik crowdsecurity/base-http-scenarios crowdsecurity/http-cve
+      # registers the traefik bouncer with this key on first start
+      BOUNCER_KEY_traefik: ${BOUNCER_KEY:?set BOUNCER_KEY in .env}
+    volumes:
+      - crowdsec-db:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+      - ./acquis.yaml:/etc/crowdsec/acquis.d/traefik.yaml:ro
+      - traefik-logs:/var/log/traefik:ro
+    healthcheck:
+      test: ["CMD", "cscli", "lapi", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  traefik:
+    image: traefik:v3.6
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - --entrypoints.web.address=:80
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --experimental.plugins.bouncer.modulename=github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+      - --experimental.plugins.bouncer.version=v1.3.5
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-logs:/var/log/traefik
+    # the bouncer blocks everything while it cannot reach crowdsec, so start once it answers
+    depends_on:
+      crowdsec:
+        condition: service_healthy
+
+  # any app you want protected: add the crowdsec@docker middleware to its router
+  whoami:
+    image: traefik/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whoami.rule=PathPrefix(`/`)
+      - traefik.http.routers.whoami.entrypoints=web
+      - traefik.http.routers.whoami.middlewares=crowdsec@docker
+      - traefik.http.middlewares.crowdsec.plugin.bouncer.enabled=true
+      - traefik.http.middlewares.crowdsec.plugin.bouncer.crowdsecMode=stream
+      - traefik.http.middlewares.crowdsec.plugin.bouncer.crowdsecLapiHost=crowdsec:8080
+      - traefik.http.middlewares.crowdsec.plugin.bouncer.crowdsecLapiKey=${BOUNCER_KEY}
+
+  argos:
+    image: ghcr.io/georgemos940/crowdsec-argos-ui:latest
+    container_name: argos
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ARGOS_PORT:-3000}:3000"
+    environment:
+      LAPI_URL: http://crowdsec:8080
+      LAPI_USER: argos
+      LAPI_PASSWORD: ${ARGOS_LAPI_PASSWORD:?set ARGOS_LAPI_PASSWORD in .env}
+      # creates the argos machine in crowdsec on first start
+      LAPI_AUTO_REGISTER: "true"
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      CROWDSEC_CONTAINER: crowdsec
+      DATA_DIR: /data
+      # plain http on localhost; set true once it sits behind https
+      COOKIE_SECURE: "false"
+    volumes:
+      - argos-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      crowdsec:
+        condition: service_healthy
+
+volumes:
+  crowdsec-db:
+  crowdsec-config:
+  traefik-logs:
+  argos-data:
